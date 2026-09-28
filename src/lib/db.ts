@@ -15,6 +15,10 @@ export interface CachedFolder {
   title: string;
   accessHash: string;
   createdAt: number;
+  chatType?: "folder" | "saved" | "bot" | "user" | "group" | "channel";
+  username?: string;
+  unreadCount?: number;
+  isTgDriveFolder?: boolean;
 }
 
 export interface CachedFile {

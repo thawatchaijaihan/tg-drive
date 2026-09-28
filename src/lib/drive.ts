@@ -18,8 +18,17 @@ function toInputChannel(id: string, accessHash: string) {
   return new Api.InputChannel({ channelId: bigInt(id), accessHash: bigInt(accessHash) });
 }
 
-function toInputPeerChannel(id: string, accessHash: string) {
-  return new Api.InputPeerChannel({ channelId: bigInt(id), accessHash: bigInt(accessHash) });
+export function toInputPeer(id: string, accessHash: string, chatType?: string): Api.TypeInputPeer {
+  if (id === "self" || chatType === "saved") {
+    return new Api.InputPeerSelf();
+  }
+  if (chatType === "group") {
+    return new Api.InputPeerChat({ chatId: bigInt(id) });
+  }
+  if (chatType === "bot" || chatType === "user") {
+    return new Api.InputPeerUser({ userId: bigInt(id), accessHash: bigInt(accessHash || "0") });
+  }
+  return new Api.InputPeerChannel({ channelId: bigInt(id), accessHash: bigInt(accessHash || "0") });
 }
 
 // ─── Metadata caption ─────────────────────────────────────────────────────────
@@ -52,27 +61,92 @@ function parseCaption(caption: string | undefined): FileMeta | null {
   return null;
 }
 
-// ─── Folders ─────────────────────────────────────────────────────────────────
+// ─── Folders & Chats ──────────────────────────────────────────────────────────
 
-export async function getFolders(): Promise<CachedFolder[]> {
+export async function getAllChats(): Promise<{
+  driveFolders: CachedFolder[];
+  chats: CachedFolder[];
+}> {
   const client = await getClient();
   const dialogs = await client.getDialogs({ limit: 200 });
-  const folders: CachedFolder[] = [];
+  const driveFolders: CachedFolder[] = [];
+  const chats: CachedFolder[] = [];
+
+  // Always ensure Saved Messages is present
+  const savedFolder: CachedFolder = {
+    id: "self",
+    title: "Saved Messages",
+    accessHash: "0",
+    createdAt: Date.now(),
+    chatType: "saved",
+    isTgDriveFolder: false,
+  };
+  await db.folders.put(savedFolder);
+  chats.push(savedFolder);
 
   for (const dialog of dialogs) {
     const entity = dialog.entity;
-    if (entity instanceof Api.Channel && entity.title?.startsWith(FOLDER_TAG)) {
-      const folder: CachedFolder = {
-        id: entity.id.toString(),
-        title: entity.title.replace(FOLDER_TAG, "").trim(),
-        accessHash: entity.accessHash?.toString() ?? "0",
-        createdAt: Date.now(),
-      };
-      folders.push(folder);
-      await db.folders.put(folder);
+    if (!entity) continue;
+
+    const id = entity.id.toString();
+    let title = dialog.title || "Untitled";
+    const accessHash = (entity as { accessHash?: { toString: () => string } }).accessHash?.toString() ?? "0";
+    let chatType: CachedFolder["chatType"] = "user";
+    let isTgDriveFolder = false;
+
+    if (entity instanceof Api.User) {
+      if (entity.self) {
+        continue; // Already added as savedFolder
+      } else if (entity.bot) {
+        chatType = "bot";
+        title = dialog.title || [entity.firstName, entity.lastName].filter(Boolean).join(" ") || entity.username || "Bot";
+      } else {
+        chatType = "user";
+        title = dialog.title || [entity.firstName, entity.lastName].filter(Boolean).join(" ") || entity.username || "Direct Chat";
+      }
+    } else if (entity instanceof Api.Chat) {
+      chatType = "group";
+      title = entity.title || "Group";
+    } else if (entity instanceof Api.Channel) {
+      if (entity.title?.startsWith(FOLDER_TAG)) {
+        isTgDriveFolder = true;
+        title = entity.title.replace(FOLDER_TAG, "").trim();
+        chatType = "folder";
+      } else if (entity.megagroup) {
+        chatType = "group";
+        title = entity.title || "Supergroup";
+      } else {
+        chatType = "channel";
+        title = entity.title || "Channel";
+      }
+    }
+
+    const folder: CachedFolder = {
+      id,
+      title,
+      accessHash,
+      createdAt: dialog.date ? dialog.date * 1000 : Date.now(),
+      chatType,
+      isTgDriveFolder,
+      unreadCount: dialog.unreadCount || 0,
+      username: (entity as { username?: string }).username,
+    };
+
+    await db.folders.put(folder);
+
+    if (isTgDriveFolder) {
+      driveFolders.push(folder);
+    } else {
+      chats.push(folder);
     }
   }
-  return folders;
+
+  return { driveFolders, chats };
+}
+
+export async function getFolders(): Promise<CachedFolder[]> {
+  const { driveFolders } = await getAllChats();
+  return driveFolders;
 }
 
 export async function createFolder(name: string): Promise<CachedFolder> {
@@ -95,6 +169,8 @@ export async function createFolder(name: string): Promise<CachedFolder> {
     title: name,
     accessHash: channel.accessHash?.toString() ?? "0",
     createdAt: Date.now(),
+    chatType: "folder",
+    isTgDriveFolder: true,
   };
   await db.folders.put(folder);
   return folder;
@@ -105,9 +181,11 @@ export async function deleteFolder(folderId: string): Promise<void> {
   const folder = await db.folders.get(folderId);
   if (!folder) return;
 
-  await client.invoke(
-    new Api.channels.DeleteChannel({ channel: toInputChannel(folderId, folder.accessHash) })
-  );
+  if (folder.isTgDriveFolder && folder.accessHash && folder.accessHash !== "0") {
+    await client.invoke(
+      new Api.channels.DeleteChannel({ channel: toInputChannel(folderId, folder.accessHash) })
+    );
+  }
   await db.folders.delete(folderId);
   await db.files.where("folderId").equals(folderId).delete();
   const fileIds = (await db.files.where("folderId").equals(folderId).primaryKeys()) as string[];
@@ -119,9 +197,9 @@ export async function deleteFolder(folderId: string): Promise<void> {
 export async function getFiles(folderId: string): Promise<CachedFile[]> {
   const client = await getClient();
   const folder = await db.folders.get(folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Chat or folder not found");
 
-  const peer = toInputPeerChannel(folderId, folder.accessHash);
+  const peer = toInputPeer(folder.id, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { limit: 100 });
   const files: CachedFile[] = [];
 
@@ -166,7 +244,6 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
 export async function getThumbnail(file: CachedFile): Promise<string | null> {
   if (!file.mimeType.startsWith("image/")) return null;
 
-  // Return from cache if available
   const cached = await db.thumbs.get(file.id);
   if (cached) return cached.dataUrl;
 
@@ -174,13 +251,12 @@ export async function getThumbnail(file: CachedFile): Promise<string | null> {
   const folder = await db.folders.get(file.folderId);
   if (!folder) return null;
 
-  const peer = toInputPeerChannel(file.folderId, folder.accessHash);
+  const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { ids: [file.messageId] });
   const msg = messages[0];
   if (!msg?.media) return null;
 
   try {
-    // Pick the largest available thumbnail by pixel area
     let bestThumbIndex = 0;
     if (msg.media instanceof Api.MessageMediaDocument) {
       const doc = msg.media.document;
@@ -200,7 +276,6 @@ export async function getThumbnail(file: CachedFile): Promise<string | null> {
     );
     if (!data) return null;
 
-    // Convert to base64 safely using FileReader (avoids btoa call stack overflow)
     const raw = data as unknown as { buffer: ArrayBuffer; byteOffset: number; byteLength: number };
     const ab = raw.buffer
       ? raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
@@ -230,9 +305,9 @@ export async function uploadFile(
 ): Promise<CachedFile> {
   const client = await getClient();
   const folder = await db.folders.get(folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Folder or chat not found");
 
-  const peer = toInputPeerChannel(folderId, folder.accessHash);
+  const peer = toInputPeer(folderId, folder.accessHash, folder.chatType);
   const uploadedFile = await client.uploadFile({ file, workers: 4, onProgress });
 
   const message = await client.sendFile(peer, {
@@ -258,9 +333,9 @@ export async function uploadFile(
 export async function previewFile(file: CachedFile): Promise<string> {
   const client = await getClient();
   const folder = await db.folders.get(file.folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Folder or chat not found");
 
-  const peer = toInputPeerChannel(file.folderId, folder.accessHash);
+  const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { ids: [file.messageId] });
   if (!messages[0]?.media) throw new Error("File not found on Telegram");
 
@@ -276,9 +351,9 @@ export async function previewFile(file: CachedFile): Promise<string> {
 export async function downloadFile(file: CachedFile): Promise<void> {
   const client = await getClient();
   const folder = await db.folders.get(file.folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Folder or chat not found");
 
-  const peer = toInputPeerChannel(file.folderId, folder.accessHash);
+  const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { ids: [file.messageId] });
   if (!messages[0]?.media) throw new Error("File not found on Telegram");
 
@@ -295,9 +370,9 @@ export async function downloadFile(file: CachedFile): Promise<void> {
 export async function deleteFile(file: CachedFile): Promise<void> {
   const client = await getClient();
   const folder = await db.folders.get(file.folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Folder or chat not found");
 
-  const peer = toInputPeerChannel(file.folderId, folder.accessHash);
+  const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
   await client.deleteMessages(peer, [file.messageId], { revoke: true });
   await db.files.delete(file.id);
   await db.thumbs.delete(file.id);

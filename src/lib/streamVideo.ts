@@ -25,6 +25,8 @@ const CHUNKS_BEFORE_PLAY = 3;
  * but ONLY if the video is paused or at the very beginning (to avoid restart).
  * Otherwise we leave the partial blob and the user just can't seek past it.
  */
+import { toInputPeer } from "./drive";
+
 export async function streamVideo(
   file: CachedFile,
   onProgress: (pct: number) => void,
@@ -33,12 +35,9 @@ export async function streamVideo(
 ): Promise<void> {
   const client = await getClient();
   const folder = await db.folders.get(file.folderId);
-  if (!folder) throw new Error("Folder not found");
+  if (!folder) throw new Error("Folder or chat not found");
 
-  const peer = new Api.InputPeerChannel({
-    channelId: bigInt(file.folderId),
-    accessHash: bigInt(folder.accessHash),
-  });
+  const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { ids: [file.messageId] });
   const msg = messages[0];
   if (!msg?.media) throw new Error("File not found on Telegram");
