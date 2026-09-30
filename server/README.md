@@ -66,3 +66,12 @@ sudo systemctl restart tg-filestream.service
 # View live logs
 journalctl -u tg-filestream.service -f
 ```
+
+---
+
+## 🛠️ Utility Scripts (`scripts/`)
+
+- `test_auth.py`: Quick authentication test to verify API ID/Hash and Bot Token connectivity.
+- `test_event.py`: Tests Telegram MTProto live message reception.
+- `edit_caption.py`: Edits a Telegram message caption in a channel (e.g. adding streaming links).
+
