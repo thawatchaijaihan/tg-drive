@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram File Stream Engine & Video Player (Python/Telethon)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tg-filestream
+EnvironmentFile=-/home/ubuntu/tg-filestream/.env
+ExecStart=/usr/bin/python3 /home/ubuntu/tg-filestream/stream_server.py
+Restart=always
+RestartSec=5
+Environment=PORT=8085
+Environment=BASE_URL=https://stream.capt-th.work
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

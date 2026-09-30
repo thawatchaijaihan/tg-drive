@@ -2,16 +2,16 @@
 
 <img src="public/favicon.svg" width="80" height="80" alt="TGDrive Logo" />
 
-# TGDrive
+# TGDrive & FileStream
 
-**Unlimited cloud storage — powered by your Telegram account**
+**Unlimited cloud storage & high-performance media streaming — powered by Telegram**
 
-[![Deploy](https://github.com/fbpatel003/tgdrive/actions/workflows/deploy.yml/badge.svg)](https://github.com/fbpatel003/tgdrive/actions/workflows/deploy.yml)
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-fbpatel003.github.io%2Ftgdrive-blue)](https://fbpatel003.github.io/tgdrive/)
+[![Frontend](https://img.shields.io/badge/Frontend-Cloudflare%20Pages-f38020)](https://tgdrive-d7y.pages.dev)
+[![Backend](https://img.shields.io/badge/Backend-OCI%20Stream%20%3A8085-blue)](https://stream.capt-th.work/health)
+![Stack](https://img.shields.io/badge/stack-React%2019%20%2B%20Telethon%20%2B%20HLS-blueviolet)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tech](https://img.shields.io/badge/stack-React%20%2B%20GramJS%20%2B%20Vite-blueviolet)
 
-[Live Demo](https://fbpatel003.github.io/tgdrive/) · [Report Bug](https://github.com/fbpatel003/tgdrive/issues) · [Request Feature](https://github.com/fbpatel003/tgdrive/issues)
+[Web App Live](https://tgdrive-d7y.pages.dev) · [Stream Gateway](https://stream.capt-th.work)
 
 </div>
 
@@ -55,18 +55,33 @@ TGDrive turns your Telegram account into unlimited cloud storage — directly in
 
 ---
 
-## 🛠️ How It Works
+## 🛠️ Architecture & Dual Subsystems
 
 ```
-Your Browser
-├── React UI
-├── GramJS (MTProto client — same protocol as official Telegram app)
-├── IndexedDB (session, credentials, file metadata cache)
-└── Direct WebSocket ──► Telegram MTProto servers
-                              └── Your files stored here permanently
+┌─────────────────────────────────────────────────────────────┐
+│                        TGDrive System                       │
+├──────────────────────────────┬──────────────────────────────┤
+│  Frontend (Cloudflare Pages) │  FileStream Server (OCI)     │
+│  - React 19 + TypeScript     │  - Python 3 + Telethon       │
+│  - GramJS in-browser MTProto │  - aiohttp HTTP/HLS Server   │
+│  - Direct client-to-Telegram │  - P2P WebRTC Swarm & HLS.js │
+│  - Zero server storage       │  - Cloudflare Tunnel (:8085) │
+└──────────────┬───────────────┴──────────────┬───────────────┘
+               │                              │
+               ▼                              ▼
+      [Telegram Servers] ◄────────────────────┘
 ```
 
-Folders are **private Telegram channels** prefixed with `[TGDrive]`. Files are sent as document attachments with a JSON caption carrying the original filename, size, MIME type, and upload timestamp — so metadata is always accurate regardless of how Telegram processes the file.
+### 1. Frontend WebUI (`/src`)
+- **Direct MTProto Connection:** Connects directly from the browser to Telegram servers via WebSockets using GramJS.
+- **Client-Side Privacy:** Session strings and keys stay in IndexedDB inside your browser.
+- **Folder Management:** Channels prefixed with `[TGDrive]` function as virtual folders.
+
+### 2. High-Performance FileStream Server (`/server`)
+- **Direct Video Streaming:** Exposes `/watch/{chat_id}/{msg_id}` and `/stream/{chat_id}/{msg_id}` with full HTTP Range Request support for instant seeking.
+- **Adaptive Bitrates (HLS):** Automatically serves multi-quality HLS streams with on-the-fly FFmpeg transcoding.
+- **WebRTC P2P Mesh Swarm:** Embeds `p2p-media-loader` so viewers share video segments directly across peers, drastically saving egress bandwidth.
+- **LRU Disk Caching:** High-speed 20GB local disk cache on OCI for instant media chunk serving.
 
 ---
 

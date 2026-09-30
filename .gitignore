@@ -22,3 +22,31 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+!server/.env.example
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Telegram Bot & Database
+*.session
+*.session-journal
+*.db
+*.db-journal
+
+# FileStream Cache & Transcoded Media
+server/cache/
+server/transcoded/
+cache/
+transcoded/
