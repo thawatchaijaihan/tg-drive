@@ -4,7 +4,8 @@ import {
   Folder, FileText, Image, Video, Music, Archive,
   Upload, FolderPlus, Download, Trash2, ChevronLeft,
   RefreshCw, Loader2, Eye, LayoutGrid, List, Share2,
-  Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User
+  Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User,
+  PanelLeftClose, PanelLeftOpen, GripVertical
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatSidebar from "../components/ChatSidebar";
@@ -76,6 +77,70 @@ export default function DrivePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [previewingFile, setPreviewingFile] = useState<CachedFile | null>(null);
   const [sharingFile, setSharingFile] = useState<CachedFile | null>(null);
+
+  // Dynamic Resizable & Collapsible Sidebar
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("tgdrive_sidebar_width");
+    return saved ? Math.min(Math.max(Number(saved), 240), 600) : 320;
+  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem("tgdrive_sidebar_collapsed") === "true";
+  });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const resize = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+      const newWidth = Math.min(Math.max(e.clientX, 240), 600);
+      setSidebarWidth(newWidth);
+      localStorage.setItem("tgdrive_sidebar_width", String(newWidth));
+    }
+  }, [isDragging]);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener("mousemove", resize);
+      window.addEventListener("mouseup", stopResizing);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    } else {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isDragging, resize, stopResizing]);
+
+  // Persist collapse state
+  useEffect(() => {
+    localStorage.setItem("tgdrive_sidebar_collapsed", String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
+
+  // Keyboard shortcut Ctrl+B or Cmd+B to toggle sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setIsSidebarCollapsed((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const currentFolder = folders.find((f) => f.id === folderId) || chats.find((c) => c.id === folderId);
 
@@ -149,23 +214,49 @@ export default function DrivePage() {
   };
 
   return (
-    <div className="min-h-screen bg-base-100 flex flex-col">
+    <div className="h-screen bg-base-100 flex flex-col overflow-hidden">
       <Navbar />
 
       {/* Main Two-Pane Layout */}
-      <div className="flex-1 flex w-full max-w-[1600px] mx-auto overflow-hidden">
+      <div className="flex-1 flex w-full overflow-hidden">
         
-        {/* Desktop Sidebar (Left Pane) */}
-        <ChatSidebar
-          className="w-72 lg:w-80 hidden md:flex flex-shrink-0"
-          driveFolders={folders}
-          chats={chats}
-          activeId={folderId || "root"}
-          onSelectChat={(id) => navigate(id ? `/drive/${id}` : "/drive")}
-          onNewFolder={() => setShowNewFolder(true)}
-          onDeleteFolder={handleDeleteFolder}
-          loading={loading}
-        />
+        {/* Desktop Sidebar (Left Pane) with Dynamic Width */}
+        {!isSidebarCollapsed && (
+          <div
+            style={{ width: `${sidebarWidth}px` }}
+            className={`hidden md:flex flex-shrink-0 flex-col h-full relative ${
+              isDragging ? "select-none" : "transition-[width] duration-150 ease-out"
+            }`}
+          >
+            <ChatSidebar
+              className="w-full h-full border-r border-base-300"
+              driveFolders={folders}
+              chats={chats}
+              activeId={folderId || "root"}
+              onSelectChat={(id) => navigate(id ? `/drive/${id}` : "/drive")}
+              onNewFolder={() => setShowNewFolder(true)}
+              onDeleteFolder={handleDeleteFolder}
+              loading={loading}
+              onCollapse={() => setIsSidebarCollapsed(true)}
+            />
+          </div>
+        )}
+
+        {/* Resizer Splitter (Drag Handle) */}
+        {!isSidebarCollapsed && (
+          <div
+            onMouseDown={startResizing}
+            className={`hidden md:flex items-center justify-center w-1.5 hover:w-2 cursor-col-resize z-20 group relative select-none transition-all ${
+              isDragging ? "bg-primary w-2 shadow-md" : "bg-base-300/60 hover:bg-primary/50"
+            }`}
+            title="Drag to resize sidebar width"
+          >
+            <div className="absolute inset-y-0 -left-1 -right-1" />
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+              <GripVertical size={12} className="text-primary-content" />
+            </div>
+          </div>
+        )}
 
         {/* Mobile Drawer (Left Pane on Mobile) */}
         {showMobileSidebar && (
@@ -204,6 +295,16 @@ export default function DrivePage() {
               >
                 <Menu size={16} />
                 <span className="text-xs">Chats</span>
+              </button>
+
+              {/* Desktop Sidebar Toggle Button */}
+              <button
+                className="btn btn-ghost btn-sm hidden md:flex items-center gap-1.5 px-2 border border-base-300 hover:border-primary/50 text-base-content/70 hover:text-base-content"
+                onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+                title={isSidebarCollapsed ? "Show Sidebar (Ctrl+B)" : "Hide Sidebar (Ctrl+B)"}
+              >
+                {isSidebarCollapsed ? <PanelLeftOpen size={16} className="text-primary" /> : <PanelLeftClose size={16} />}
+                {isSidebarCollapsed && <span className="text-xs">Chats</span>}
               </button>
 
               <button
@@ -293,7 +394,7 @@ export default function DrivePage() {
                   <span>📁 TGDrive Folders ({folders.length})</span>
                   <span>Select any folder or chat from left sidebar</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
                   {folders.map((folder) => (
                     <div
                       key={folder.id}
@@ -337,7 +438,7 @@ export default function DrivePage() {
               </div>
             ) : viewMode === "grid" ? (
               /* ── Grid view ── */
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
                 {files.map((file) => (
                   <div key={file.id} className="group relative bg-base-200/70 border border-base-300/50 rounded-xl overflow-hidden hover:bg-base-200 hover:shadow-md transition-all">
                     {/* Thumbnail area */}

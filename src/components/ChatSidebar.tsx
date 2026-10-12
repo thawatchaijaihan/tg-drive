@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import {
   HardDrive, Folder, Bookmark, Bot, Users, Megaphone,
-  User, Search, Plus, Trash2, FolderPlus, Sparkles
+  User, Search, Plus, Trash2, FolderPlus, Sparkles,
+  PanelLeftClose, X
 } from "lucide-react";
 import type { CachedFolder } from "../lib/db";
 
@@ -15,6 +16,7 @@ interface ChatSidebarProps {
   loading?: boolean;
   className?: string;
   onCloseMobile?: () => void;
+  onCollapse?: () => void;
 }
 
 type FilterTab = "all" | "drive" | "bots" | "groups";
@@ -29,6 +31,7 @@ export default function ChatSidebar({
   loading = false,
   className = "",
   onCloseMobile,
+  onCollapse,
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<FilterTab>("all");
@@ -97,13 +100,32 @@ export default function ChatSidebar({
               Chats &amp; Folders
             </span>
           </div>
-          <button
-            className="btn btn-ghost btn-xs gap-1 text-primary hover:bg-primary/10"
-            onClick={onNewFolder}
-            title="Create new TGDrive folder"
-          >
-            <FolderPlus size={14} /> New
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              className="btn btn-ghost btn-xs gap-1 text-primary hover:bg-primary/10"
+              onClick={onNewFolder}
+              title="Create new TGDrive folder"
+            >
+              <FolderPlus size={14} /> New
+            </button>
+            {onCloseMobile ? (
+              <button
+                className="btn btn-ghost btn-xs btn-circle hover:bg-base-300 text-base-content/60 md:hidden"
+                onClick={onCloseMobile}
+                title="Close sidebar"
+              >
+                <X size={15} />
+              </button>
+            ) : onCollapse ? (
+              <button
+                className="btn btn-ghost btn-xs btn-circle hover:bg-base-300 text-base-content/60 hidden md:inline-flex"
+                onClick={onCollapse}
+                title="Collapse sidebar (Ctrl+B)"
+              >
+                <PanelLeftClose size={15} />
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {/* Search */}
