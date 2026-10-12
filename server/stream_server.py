@@ -231,6 +231,35 @@ def get_file_info(msg):
                 if attr.file_name:
                     file_name = attr.file_name
 
+    # Parse TGDrive JSON metadata in caption if present
+    if getattr(msg, "message", None):
+        try:
+            meta = json.loads(msg.message)
+            if isinstance(meta, dict) and "name" in meta:
+                file_name = meta["name"]
+                if "size" in meta and meta["size"] > 0:
+                    file_size = meta["size"]
+                if "mime" in meta and meta["mime"]:
+                    mime_type = meta["mime"]
+        except Exception:
+            pass
+
+    # Ensure valid mime_type for common video extensions
+    fn_lower = file_name.lower()
+    if mime_type == "application/octet-stream" or not mime_type:
+        if fn_lower.endswith(('.mp4', '.m4v')):
+            mime_type = "video/mp4"
+        elif fn_lower.endswith('.mkv'):
+            mime_type = "video/x-matroska"
+        elif fn_lower.endswith('.webm'):
+            mime_type = "video/webm"
+        elif fn_lower.endswith('.mov'):
+            mime_type = "video/quicktime"
+        elif fn_lower.endswith('.mp3'):
+            mime_type = "audio/mpeg"
+        elif fn_lower.endswith('.m4a'):
+            mime_type = "audio/mp4"
+
     return {
         "id": msg.id,
         "name": file_name,
@@ -262,21 +291,103 @@ async def fetch_tg_message(chat_id: int, msg_id: int):
             logger.warning(f"Error fetching message {msg_id} in {cid}: {e}")
     return chat_id, None
 
+async def resolve_media_target(chat_id: int, msg_id: int):
+    real_cid, msg = await fetch_tg_message(chat_id, msg_id)
+    if not msg or not msg.media:
+        return real_cid, None
+
+    info = get_file_info(msg)
+    if not info:
+        return real_cid, None
+
+    # Check if this message is part of a multi-part file group
+    meta = None
+    if getattr(msg, "message", None):
+        try:
+            m_parsed = json.loads(msg.message)
+            if isinstance(m_parsed, dict) and m_parsed.get("fileGroupId") and m_parsed.get("totalParts", 1) > 1:
+                meta = m_parsed
+        except Exception:
+            pass
+
+    if not meta:
+        return real_cid, {
+            "is_multipart": False,
+            "info": info,
+            "parts": [{
+                "partIndex": 0,
+                "msg": msg,
+                "start_byte": 0,
+                "end_byte": info["size"] - 1,
+                "size": info["size"]
+            }]
+        }
+
+    group_id = meta["fileGroupId"]
+    total_parts = meta.get("totalParts", 1)
+    current_part_idx = meta.get("partIndex", 0)
+    current_part_size = meta.get("partSize", msg.file.size if msg.file else 0)
+
+    part_msgs = {current_part_idx: (msg, current_part_size)}
+
+    # Scan adjacent messages in channel to gather all parts
+    search_range = range(max(1, msg_id - total_parts - 5), msg_id + total_parts + 6)
+    candidate_ids = [mid for mid in search_range if mid != msg_id]
+    if candidate_ids:
+        try:
+            candidates = await client.get_messages(real_cid, ids=candidate_ids)
+            for c in candidates:
+                if c and c.media and getattr(c, "message", None):
+                    try:
+                        c_meta = json.loads(c.message)
+                        if isinstance(c_meta, dict) and c_meta.get("fileGroupId") == group_id:
+                            p_idx = c_meta.get("partIndex", 0)
+                            p_size = c_meta.get("partSize", c.file.size if c.file else 0)
+                            part_msgs[p_idx] = (c, p_size)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Error scanning sibling parts for {group_id}: {e}")
+
+    # Build contiguous byte offsets
+    parts_list = []
+    current_byte = 0
+    for p_idx in sorted(part_msgs.keys()):
+        p_msg, p_sz = part_msgs[p_idx]
+        parts_list.append({
+            "partIndex": p_idx,
+            "msg": p_msg,
+            "start_byte": current_byte,
+            "end_byte": current_byte + p_sz - 1,
+            "size": p_sz
+        })
+        current_byte += p_sz
+
+    if current_byte > 0:
+        info["size"] = current_byte
+
+    return real_cid, {
+        "is_multipart": True,
+        "group_id": group_id,
+        "total_parts": total_parts,
+        "info": info,
+        "parts": parts_list
+    }
+
 async def get_or_probe_file_info(chat_id: int, msg_id: int):
     cached = get_db_video(chat_id, msg_id)
     if not cached and chat_id > 0:
         cached = get_db_video(-int(f"100{chat_id}"), msg_id)
 
-    if cached and cached.get("duration", 0) > 0:
+    # Re-probe if cached is missing or marked with octet-stream or incomplete .part1
+    if cached and cached.get("duration", 0) > 0 and cached.get("mime", "") != "application/octet-stream" and not cached.get("name", "").endswith(".part1"):
         return cached
 
-    real_cid, msg = await fetch_tg_message(chat_id, msg_id)
-    if not msg:
+    real_cid, target = await resolve_media_target(chat_id, msg_id)
+    if not target:
         return None
 
-    info = get_file_info(msg)
-    if not info:
-        return None
+    info = target["info"]
 
     # If duration is 0, probe duration via ffprobe from local stream
     if info.get("duration", 0) <= 0 and info.get("is_video"):
@@ -322,6 +433,7 @@ async def handle_index(request: web.Request):
         "features": [
             "HLS Adaptive Bitrate Streaming",
             "P2P WebRTC Mesh Swarm",
+            "Multi-Part Automatic Re-assembly",
             "AV1 Hardware & SVT-AV1 Transcoding",
             "AI Per-Scene Variable Bitrate",
             "Predictive Service Worker Prefetching",
@@ -352,14 +464,11 @@ async def handle_stream(request: web.Request):
 
     is_download = request.path.startswith("/dl/")
 
-    real_cid, msg = await fetch_tg_message(chat_id, msg_id)
-    if not msg or not msg.media:
+    real_cid, target = await resolve_media_target(chat_id, msg_id)
+    if not target or not target["parts"]:
         return web.Response(text="Message does not contain streamable media", status=404)
 
-    file_info = get_file_info(msg)
-    if not file_info:
-        return web.Response(text="Invalid media file", status=404)
-
+    file_info = target["info"]
     file_size = file_info["size"]
     mime_type = file_info["mime"]
     file_name = file_info["name"]
@@ -406,13 +515,21 @@ async def handle_stream(request: web.Request):
 
     chunk_size = 512 * 1024
     try:
-        async for chunk in client.iter_download(
-            msg.media,
-            offset=start,
-            request_size=chunk_size,
-            limit=length
-        ):
-            await response.write(chunk)
+        for part in target["parts"]:
+            p_start = part["start_byte"]
+            p_end = part["end_byte"]
+            overlap_start = max(start, p_start)
+            overlap_end = min(end, p_end)
+            if overlap_start <= overlap_end:
+                sub_offset = overlap_start - p_start
+                sub_length = overlap_end - overlap_start + 1
+                async for chunk in client.iter_download(
+                    part["msg"].media,
+                    offset=sub_offset,
+                    request_size=chunk_size,
+                    limit=sub_length
+                ):
+                    await response.write(chunk)
     except (asyncio.CancelledError, ConnectionResetError):
         pass
     except Exception as e:
@@ -1151,36 +1268,53 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       };
       if (video.webkitRequestFullscreen) video.webkitRequestFullscreen = video.requestFullscreen;
 
-      const isP2PSupported = window.p2pml && p2pml.hlsjs && p2pml.hlsjs.Engine.isSupported();
+      const isP2PSupported = !!(window.p2pml && p2pml.hlsjs && p2pml.hlsjs.Engine && p2pml.hlsjs.Engine.isSupported && p2pml.hlsjs.Engine.isSupported());
 
-      if (isP2PSupported && Hls.isSupported()) {
-        const engine = new p2pml.hlsjs.Engine({
-          segments: {
-            swarmId: 'stream___CHAT_ID_____MSG_ID__',
-            forwardSegmentCount: 20
-          },
-          loader: {
-            trackerAnnounce: [
-              'wss://tracker.openwebtorrent.com',
-              'wss://tracker.files.fm:7073/announce',
-              'wss://tracker.novage.com.ua:443'
-            ],
-            rtcConfig: {
-              iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-              ]
-            }
+      if (window.Hls && Hls.isSupported()) {
+        let loaderClass = undefined;
+        if (isP2PSupported) {
+          try {
+            const engine = new p2pml.hlsjs.Engine({
+              segments: {
+                swarmId: 'stream___CHAT_ID_____MSG_ID__',
+                forwardSegmentCount: 20
+              },
+              loader: {
+                trackerAnnounce: [
+                  'wss://tracker.openwebtorrent.com',
+                  'wss://tracker.files.fm:7073/announce',
+                  'wss://tracker.novage.com.ua:443'
+                ],
+                rtcConfig: {
+                  iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478' }
+                  ]
+                }
+              }
+            });
+            loaderClass = engine.createLoaderClass();
+          } catch (e) {
+            console.warn('P2P engine error, falling back to standard loader:', e);
           }
-        });
+        }
 
-        const hls = new Hls({
-          liveSyncDurationCount: 7,
-          loader: engine.createLoaderClass()
-        });
+        const hlsConfig = {
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          enableWorker: true
+        };
+        if (loaderClass) {
+          hlsConfig.loader = loaderClass;
+        }
 
+        const hls = new Hls(hlsConfig);
         hlsInstance = hls;
-        p2pml.hlsjs.initHlsJsPlayer(hls);
+
+        if (loaderClass && window.p2pml && p2pml.hlsjs) {
+          try { p2pml.hlsjs.initHlsJsPlayer(hls); } catch (e) {}
+        }
+
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
 
