@@ -1204,60 +1204,11 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       visibility: visible;
     }
 
-    /* Big Center Play Overlay for Smart TVs and Browsers */
-    .play-overlay {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 50;
-      cursor: pointer;
-      transition: opacity 0.25s ease;
-    }
-    .play-overlay.hidden {
-      display: none !important;
-    }
-    .play-btn-circle {
-      width: 90px;
-      height: 90px;
-      border-radius: 50%;
-      background: rgba(56, 189, 248, 0.9);
-      border: 3px solid rgba(255, 255, 255, 0.85);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.5);
-      transition: transform 0.2s, background 0.2s;
-      outline: none;
-      cursor: pointer;
-    }
-    .play-btn-circle:hover, .play-btn-circle:focus {
-      transform: scale(1.1);
-      background: #38bdf8;
-    }
-    .play-overlay-text {
-      margin-top: 1rem;
-      font-size: 1rem;
-      font-weight: 600;
-      color: #f8fafc;
-      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-    }
   </style>
 </head>
 <body>
   <div id="player-container">
-    <video id="video-player" playsinline controls autoplay preload="auto"></video>
-
-    <!-- Center Play/Resume Overlay Button -->
-    <div id="play-overlay" class="play-overlay">
-      <button class="play-btn-circle" id="play-overlay-btn" type="button" aria-label="Play">
-        <svg viewBox="0 0 24 24" width="44" height="44" fill="#ffffff" style="margin-left:4px;"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-      </button>
-      <div class="play-overlay-text">กดเพื่อเริ่มเล่น (Play)</div>
-    </div>
+    <video id="video-player" src="__STREAM_URL__" playsinline controls autoplay preload="auto"></video>
 
     <!-- Floating Quality Control Badge (Top-Right) -->
     <div class="quality-wrap" id="quality-wrap">
@@ -1440,32 +1391,14 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       }, 4000);
     }
 
-    const playOverlay = document.getElementById('play-overlay');
-    function updatePlayOverlay() {
-      if (video.paused) {
-        playOverlay.classList.remove('hidden');
-      } else {
-        playOverlay.classList.add('hidden');
-      }
-    }
-
     document.addEventListener('mousemove', wakeControl);
     document.addEventListener('touchstart', wakeControl);
-    video.addEventListener('play', () => {
-      wakeControl();
-      updatePlayOverlay();
-    });
-    video.addEventListener('playing', updatePlayOverlay);
+    video.addEventListener('play', wakeControl);
     video.addEventListener('pause', () => {
       qualityWrap.classList.remove('fade-out');
       clearTimeout(idleTimer);
-      updatePlayOverlay();
-    });
-    playOverlay.addEventListener('click', () => {
-      video.play().catch(e => console.log('Overlay play error:', e));
     });
     wakeControl();
-    updatePlayOverlay();
 
     // Keyboard Shortcuts & Double-click Fullscreen
     document.addEventListener('keydown', (e) => {
