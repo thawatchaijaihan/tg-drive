@@ -33,30 +33,37 @@ export function toInputPeer(id: string, accessHash: string, chatType?: string): 
 
 // ─── Metadata caption ─────────────────────────────────────────────────────────
 
-interface FileMeta {
-  v: 1;
+export interface FileMeta {
+  v: 1 | 2;
   name: string;
   size: number;
   mime: string;
   uploadedAt: number;
+  partIndex?: number;
+  totalParts?: number;
+  fileGroupId?: string;
+  partSize?: number;
 }
 
-function buildCaption(file: File): string {
-  const meta: FileMeta = {
-    v: 1,
-    name: file.name,
-    size: file.size,
-    mime: file.type || "application/octet-stream",
-    uploadedAt: Date.now(),
-  };
-  return JSON.stringify(meta);
+export function sanitizeFileName(name: string, maxLen = 120): string {
+  if (!name || !name.trim()) return `file_${Date.now()}`;
+  const lastDot = name.lastIndexOf(".");
+  const ext = lastDot !== -1 ? name.slice(lastDot) : "";
+  let base = lastDot !== -1 ? name.slice(0, lastDot) : name;
+  base = base.replace(/[\\/:*?"<>|\r\n\t]/g, "_").trim();
+  base = base.replace(/[. ]+$/, "");
+  if (base.length + ext.length > maxLen) {
+    const keepLen = maxLen - ext.length - 3;
+    base = base.slice(0, Math.max(keepLen, 10)) + "...";
+  }
+  return base + ext;
 }
 
 function parseCaption(caption: string | undefined): FileMeta | null {
   if (!caption) return null;
   try {
     const parsed = JSON.parse(caption);
-    if (parsed?.v === 1) return parsed as FileMeta;
+    if (parsed?.v === 1 || parsed?.v === 2) return parsed as FileMeta;
   } catch {}
   return null;
 }
@@ -201,12 +208,41 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
 
   const peer = toInputPeer(folder.id, folder.accessHash, folder.chatType);
   const messages = await client.getMessages(peer, { limit: 100 });
-  const files: CachedFile[] = [];
+  const rawList: CachedFile[] = [];
+  const multiPartGroups = new Map<string, {
+    groupId: string;
+    name: string;
+    totalSize: number;
+    mimeType: string;
+    date: number;
+    parts: { messageId: number; partIndex: number; size: number }[];
+  }>();
 
   for (const msg of messages) {
     if (!msg.media) continue;
 
     const meta = parseCaption(msg.message);
+
+    // Multi-part grouped files
+    if (meta && meta.v === 2 && meta.totalParts && meta.totalParts > 1 && meta.fileGroupId) {
+      if (!multiPartGroups.has(meta.fileGroupId)) {
+        multiPartGroups.set(meta.fileGroupId, {
+          groupId: meta.fileGroupId,
+          name: meta.name,
+          totalSize: meta.size,
+          mimeType: meta.mime,
+          date: meta.uploadedAt,
+          parts: [],
+        });
+      }
+      multiPartGroups.get(meta.fileGroupId)!.parts.push({
+        messageId: msg.id,
+        partIndex: meta.partIndex ?? 0,
+        size: meta.partSize ?? 0,
+      });
+      continue;
+    }
+
     let name: string, size: number, mimeType: string, date: number;
 
     if (meta) {
@@ -233,10 +269,31 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
       id: `${folderId}_${msg.id}`,
       folderId, messageId: msg.id, name, size, mimeType, date, mediaRef: "",
     };
-    files.push(file);
+    rawList.push(file);
     await db.files.put(file);
   }
-  return files;
+
+  // Assemble and save multi-part virtual files
+  for (const group of multiPartGroups.values()) {
+    const sortedParts = group.parts.sort((a, b) => a.partIndex - b.partIndex);
+    const primaryId = sortedParts[0]?.messageId || 0;
+    const file: CachedFile = {
+      id: `${folderId}_grp_${group.groupId}`,
+      folderId,
+      messageId: primaryId,
+      name: group.name,
+      size: group.totalSize,
+      mimeType: group.mimeType,
+      date: group.date,
+      mediaRef: "",
+      parts: sortedParts,
+    };
+    rawList.push(file);
+    await db.files.put(file);
+  }
+
+  rawList.sort((a, b) => b.date - a.date);
+  return rawList;
 }
 
 // ─── Thumbnail ────────────────────────────────────────────────────────────────
@@ -298,31 +355,157 @@ export async function getThumbnail(file: CachedFile): Promise<string | null> {
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
+export type UploadProgressCallback = (
+  pct: number,
+  detail?: { speedText?: string; etaText?: string; partText?: string }
+) => void;
+
 export async function uploadFile(
   folderId: string,
   file: File,
-  onProgress: (pct: number) => void
+  onProgress: UploadProgressCallback
 ): Promise<CachedFile> {
   const client = await getClient();
   const folder = await db.folders.get(folderId);
   if (!folder) throw new Error("Folder or chat not found");
 
   const peer = toInputPeer(folderId, folder.accessHash, folder.chatType);
-  const uploadedFile = await client.uploadFile({ file, workers: 4, onProgress });
+  const safeName = sanitizeFileName(file.name);
+  const MAX_PART_SIZE = 1900 * 1024 * 1024; // 1.9 GB safe limit
 
-  const message = await client.sendFile(peer, {
-    file: uploadedFile,
-    caption: buildCaption(file),
-    forceDocument: true,
-    workers: 4,
-  });
+  // Single-part upload (<= 1.9 GB)
+  if (file.size <= MAX_PART_SIZE) {
+    const startTime = Date.now();
+    const uploadedFile = await client.uploadFile({
+      file,
+      workers: 4,
+      onProgress: (pct) => {
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        let speedText = "";
+        let etaText = "";
+        if (elapsedSec > 1 && pct > 0) {
+          const uploadedBytes = pct * file.size;
+          const bytesPerSec = uploadedBytes / elapsedSec;
+          speedText = `${formatSize(bytesPerSec)}/s`;
+          const remaining = file.size - uploadedBytes;
+          const etaSec = Math.round(remaining / bytesPerSec);
+          etaText = etaSec > 60 ? `${Math.floor(etaSec / 60)}m ${etaSec % 60}s` : `${etaSec}s`;
+        }
+        onProgress(pct, { speedText, etaText });
+      },
+    });
 
+    const captionMeta: FileMeta = {
+      v: 2,
+      name: safeName,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+      uploadedAt: Date.now(),
+      totalParts: 1,
+    };
+
+    const message = await client.sendFile(peer, {
+      file: uploadedFile,
+      caption: JSON.stringify(captionMeta),
+      forceDocument: true,
+      workers: 4,
+    });
+
+    const cachedFile: CachedFile = {
+      id: `${folderId}_${message.id}`,
+      folderId,
+      messageId: message.id,
+      name: safeName,
+      size: file.size,
+      mimeType: file.type || "application/octet-stream",
+      date: Date.now(),
+      mediaRef: "",
+    };
+    await db.files.put(cachedFile);
+    return cachedFile;
+  }
+
+  // ─── Multi-Part Auto-Chunking (> 1.9 GB) ───
+  const totalParts = Math.ceil(file.size / MAX_PART_SIZE);
+  const fileGroupId = `grp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const uploadedParts: { messageId: number; partIndex: number; size: number }[] = [];
+  const startTime = Date.now();
+
+  for (let i = 0; i < totalParts; i++) {
+    const start = i * MAX_PART_SIZE;
+    const end = Math.min(start + MAX_PART_SIZE, file.size);
+    const partSize = end - start;
+    const chunkBlob = file.slice(start, end);
+    const chunkFile = new File([chunkBlob], `${safeName}.part${i + 1}`, {
+      type: file.type || "application/octet-stream",
+    });
+
+    const partProgress = (pct: number) => {
+      const partBytes = pct * partSize;
+      const totalUploaded = (i * MAX_PART_SIZE) + partBytes;
+      const overallPct = totalUploaded / file.size;
+
+      const elapsedSec = (Date.now() - startTime) / 1000;
+      let speedText = "";
+      let etaText = "";
+      if (elapsedSec > 1 && totalUploaded > 0) {
+        const bytesPerSec = totalUploaded / elapsedSec;
+        speedText = `${formatSize(bytesPerSec)}/s`;
+        const remaining = file.size - totalUploaded;
+        const etaSec = Math.round(remaining / bytesPerSec);
+        etaText = etaSec > 60 ? `${Math.floor(etaSec / 60)}m ${etaSec % 60}s` : `${etaSec}s`;
+      }
+
+      onProgress(overallPct, {
+        speedText,
+        etaText,
+        partText: `Part ${i + 1}/${totalParts}`,
+      });
+    };
+
+    const uploadedPart = await client.uploadFile({
+      file: chunkFile,
+      workers: 4,
+      onProgress: partProgress,
+    });
+
+    const captionMeta: FileMeta = {
+      v: 2,
+      name: safeName,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+      uploadedAt: Date.now(),
+      partIndex: i,
+      totalParts,
+      fileGroupId,
+      partSize,
+    };
+
+    const message = await client.sendFile(peer, {
+      file: uploadedPart,
+      caption: JSON.stringify(captionMeta),
+      forceDocument: true,
+      workers: 4,
+    });
+
+    uploadedParts.push({
+      messageId: message.id,
+      partIndex: i,
+      size: partSize,
+    });
+  }
+
+  const primaryMessageId = uploadedParts[0].messageId;
   const cachedFile: CachedFile = {
-    id: `${folderId}_${message.id}`,
-    folderId, messageId: message.id,
-    name: file.name, size: file.size,
+    id: `${folderId}_grp_${fileGroupId}`,
+    folderId,
+    messageId: primaryMessageId,
+    name: safeName,
+    size: file.size,
     mimeType: file.type || "application/octet-stream",
-    date: Date.now(), mediaRef: "",
+    date: Date.now(),
+    mediaRef: "",
+    parts: uploadedParts,
   };
   await db.files.put(cachedFile);
   return cachedFile;
@@ -348,23 +531,74 @@ export async function previewFile(file: CachedFile): Promise<string> {
 
 // ─── Download ─────────────────────────────────────────────────────────────────
 
-export async function downloadFile(file: CachedFile): Promise<void> {
+export async function downloadFile(
+  file: CachedFile,
+  onProgress?: (pct: number) => void
+): Promise<void> {
   const client = await getClient();
   const folder = await db.folders.get(file.folderId);
   if (!folder) throw new Error("Folder or chat not found");
 
   const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
+
+  // Multi-part download
+  if (file.parts && file.parts.length > 1) {
+    const sorted = [...file.parts].sort((a, b) => a.partIndex - b.partIndex);
+    const buffers: ArrayBuffer[] = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const part = sorted[i];
+      const msgs = await client.getMessages(peer, { ids: [part.messageId] });
+      if (!msgs[0]?.media) throw new Error(`Part ${i + 1} not found`);
+
+      const data = await client.downloadMedia(msgs[0].media, {
+        progressCallback: (downloaded, total) => {
+          if (onProgress) {
+            const d = Number(downloaded);
+            const t = Number(total) || 1;
+            const partPct = d / t;
+            onProgress((i + partPct) / sorted.length);
+          }
+        },
+      });
+
+      if (!data) throw new Error(`Failed to download part ${i + 1}`);
+      const raw = data as unknown as { buffer?: ArrayBuffer; byteOffset?: number; byteLength?: number };
+      const ab = raw.buffer
+        ? raw.buffer.slice(raw.byteOffset || 0, (raw.byteOffset || 0) + (raw.byteLength || 0))
+        : (data as unknown as ArrayBuffer);
+      buffers.push(ab);
+    }
+
+    const blob = new Blob(buffers, { type: file.mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return;
+  }
+
+  // Single file download
   const messages = await client.getMessages(peer, { ids: [file.messageId] });
   if (!messages[0]?.media) throw new Error("File not found on Telegram");
 
   const data = await client.downloadMedia(messages[0].media, {});
   if (!data) throw new Error("Download failed");
 
-  const blob = new Blob([data as ArrayBuffer], { type: file.mimeType });
+  const raw = data as unknown as { buffer?: ArrayBuffer; byteOffset?: number; byteLength?: number };
+  const ab = raw.buffer
+    ? raw.buffer.slice(raw.byteOffset || 0, (raw.byteOffset || 0) + (raw.byteLength || 0))
+    : (data as unknown as ArrayBuffer);
+
+  const blob = new Blob([ab], { type: file.mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = file.name; a.click();
-  URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 export async function deleteFile(file: CachedFile): Promise<void> {
@@ -373,7 +607,11 @@ export async function deleteFile(file: CachedFile): Promise<void> {
   if (!folder) throw new Error("Folder or chat not found");
 
   const peer = toInputPeer(file.folderId, folder.accessHash, folder.chatType);
-  await client.deleteMessages(peer, [file.messageId], { revoke: true });
+  const idsToDelete = file.parts && file.parts.length > 0
+    ? file.parts.map((p) => p.messageId)
+    : [file.messageId];
+
+  await client.deleteMessages(peer, idsToDelete, { revoke: true });
   await db.files.delete(file.id);
   await db.thumbs.delete(file.id);
 }

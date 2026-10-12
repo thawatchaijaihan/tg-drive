@@ -30,6 +30,7 @@ export interface CachedFile {
   mimeType: string;
   date: number;
   mediaRef: string;
+  parts?: { messageId: number; partIndex: number; size: number }[];
 }
 
 export interface CachedThumb {

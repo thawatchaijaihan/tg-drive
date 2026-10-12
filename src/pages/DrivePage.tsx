@@ -5,7 +5,7 @@ import {
   Upload, FolderPlus, Download, Trash2, ChevronLeft,
   RefreshCw, Loader2, Eye, LayoutGrid, List, Share2,
   Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User,
-  PanelLeftClose, PanelLeftOpen, GripVertical
+  PanelLeftClose, PanelLeftOpen, GripVertical, Play
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatSidebar from "../components/ChatSidebar";
@@ -454,7 +454,12 @@ export default function DrivePage() {
                       }
                     </div>
                     <div className="p-2.5">
-                      <p className="text-xs font-medium truncate" title={file.name}>{file.name}</p>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <p className="text-xs font-medium truncate flex-1" title={file.name}>{file.name}</p>
+                        {file.parts && file.parts.length > 1 && (
+                          <span className="badge badge-info badge-xs flex-shrink-0 font-medium">{file.parts.length}P</span>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between text-[11px] text-base-content/40 mt-0.5">
                         <span>{file.size ? formatSize(file.size) : "—"}</span>
                         <span>{new Date(file.date).toLocaleDateString()}</span>
@@ -462,6 +467,17 @@ export default function DrivePage() {
                     </div>
                     {/* Action overlay */}
                     <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {(file.mimeType.startsWith("video/") || file.name.match(/\.(mp4|mkv|webm|mov|avi)$/i)) && (
+                        <a
+                          href={`https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-xs btn-circle bg-secondary text-secondary-content border-0 shadow-sm"
+                          title="Stream via OCI HLS Player"
+                        >
+                          <Play size={11} fill="currentColor" />
+                        </a>
+                      )}
                       {canPreview(file) && (
                         <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm" onClick={() => setPreviewingFile(file)} title="Preview">
                           <Eye size={12} />
@@ -505,12 +521,19 @@ export default function DrivePage() {
                           <ThumbCell file={file} onPreview={() => setPreviewingFile(file)} />
                         </td>
                         <td>
-                          <span
-                            className={`text-sm truncate max-w-[240px] sm:max-w-md block ${canPreview(file) ? "cursor-pointer hover:text-primary transition-colors font-medium" : ""}`}
-                            onClick={() => canPreview(file) && setPreviewingFile(file)}
-                          >
-                            {file.name}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-sm truncate max-w-[240px] sm:max-w-md block ${canPreview(file) ? "cursor-pointer hover:text-primary transition-colors font-medium" : ""}`}
+                              onClick={() => canPreview(file) && setPreviewingFile(file)}
+                            >
+                              {file.name}
+                            </span>
+                            {file.parts && file.parts.length > 1 && (
+                              <span className="badge badge-info badge-xs flex-shrink-0 font-medium">
+                                {file.parts.length} Parts
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="hidden sm:table-cell text-xs text-base-content/50">
                           {file.size ? formatSize(file.size) : "—"}
@@ -519,7 +542,18 @@ export default function DrivePage() {
                           {new Date(file.date).toLocaleDateString()}
                         </td>
                         <td>
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {(file.mimeType.startsWith("video/") || file.name.match(/\.(mp4|mkv|webm|mov|avi)$/i)) && (
+                              <a
+                                href={`https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-ghost btn-xs text-secondary gap-1 hover:bg-secondary/15 font-medium"
+                                title="Stream video online"
+                              >
+                                <Play size={12} fill="currentColor" /> Stream
+                              </a>
+                            )}
                             {canPreview(file) && (
                               <button className="btn btn-ghost btn-xs btn-circle" onClick={() => setPreviewingFile(file)} title="Preview">
                                 <Eye size={13} />

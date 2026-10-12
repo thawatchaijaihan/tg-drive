@@ -14,6 +14,9 @@ interface FileStatus {
   progress: number;
   status: "pending" | "uploading" | "done" | "error";
   error?: string;
+  speedText?: string;
+  etaText?: string;
+  partText?: string;
 }
 
 export default function UploadModal({ folderId, onDone, onClose }: Props) {
@@ -43,9 +46,19 @@ export default function UploadModal({ folderId, onDone, onClose }: Props) {
         prev.map((f, idx) => (idx === i ? { ...f, status: "uploading" as const } : f))
       );
       try {
-        await uploadFile(folderId, files[i].file, (pct) => {
+        await uploadFile(folderId, files[i].file, (pct, detail) => {
           setFiles((prev) =>
-            prev.map((f, idx) => (idx === i ? { ...f, progress: Math.round(pct * 100) } : f))
+            prev.map((f, idx) =>
+              idx === i
+                ? {
+                    ...f,
+                    progress: Math.round(pct * 100),
+                    speedText: detail?.speedText,
+                    etaText: detail?.etaText,
+                    partText: detail?.partText,
+                  }
+                : f
+            )
           );
         });
         setFiles((prev) =>
@@ -86,7 +99,7 @@ export default function UploadModal({ folderId, onDone, onClose }: Props) {
           >
             <Upload size={32} className="mx-auto mb-3 text-base-content/30" />
             <p className="text-sm text-base-content/60">Drop files here or click to browse</p>
-            <p className="text-xs text-base-content/30 mt-1">Any file type, any size</p>
+            <p className="text-xs text-base-content/30 mt-1">Auto-splits files &gt; 2 GB • Fast &amp; Unlimited</p>
           </div>
         )}
 
@@ -94,16 +107,30 @@ export default function UploadModal({ folderId, onDone, onClose }: Props) {
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {files.map((f, i) => (
               <div key={i} className="bg-base-200 rounded-lg px-4 py-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm truncate max-w-[70%]">{f.file.name}</span>
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-medium truncate max-w-[65%]">{f.file.name}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {f.partText && (
+                      <span className="badge badge-info badge-xs font-semibold">{f.partText}</span>
+                    )}
                     <span className="text-xs text-base-content/40">{formatSize(f.file.size)}</span>
-                    {f.status === "done" && <CheckCircle size={14} className="text-success" />}
-                    {f.status === "error" && <AlertCircle size={14} className="text-error" />}
+                    {f.status === "done" && <CheckCircle size={15} className="text-success" />}
+                    {f.status === "error" && <AlertCircle size={15} className="text-error" />}
                   </div>
                 </div>
                 {(f.status === "uploading" || f.status === "done") && (
-                  <progress className="progress progress-primary w-full h-1" value={f.progress} max={100} />
+                  <div>
+                    <progress className="progress progress-primary w-full h-1.5" value={f.progress} max={100} />
+                    {f.status === "uploading" && (
+                      <div className="flex items-center justify-between text-[11px] text-base-content/50 mt-1">
+                        <span>{f.progress}%</span>
+                        <div className="flex items-center gap-2">
+                          {f.speedText && <span className="font-mono text-primary font-medium">{f.speedText}</span>}
+                          {f.etaText && <span>ETA: {f.etaText}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {f.status === "error" && <p className="text-xs text-error mt-1">{f.error}</p>}
               </div>
