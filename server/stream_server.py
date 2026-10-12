@@ -61,6 +61,9 @@ client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
 # Concurrency locks
 segment_locks = {}
 segment_locks_guard = asyncio.Lock()
+FFMPEG_SEMAPHORE = asyncio.Semaphore(1)  # Strictly max 1 FFmpeg process at a time to prevent flood wait
+STREAM_RANGE_CACHE = {}  # In-memory range cache (moov atoms, headers)
+MAX_RANGE_CACHE_ITEMS = 120
 
 # Transcode tasks in progress
 transcode_jobs = {}
@@ -510,10 +513,23 @@ async def handle_stream(request: web.Request):
         safe_name = file_name.replace('"', '\\"')
         headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
 
+    range_cache_key = (real_cid, msg_id, start, end)
+    if length <= 5 * 1024 * 1024 and range_cache_key in STREAM_RANGE_CACHE:
+        cached_data = STREAM_RANGE_CACHE[range_cache_key]
+        headers["Content-Length"] = str(len(cached_data))
+        response = web.StreamResponse(status=status, headers=headers)
+        await response.prepare(request)
+        await response.write(cached_data)
+        await response.write_eof()
+        return response
+
     response = web.StreamResponse(status=status, headers=headers)
     await response.prepare(request)
 
     chunk_size = 512 * 1024
+    should_cache = (length <= 5 * 1024 * 1024)
+    collected_chunks = [] if should_cache else None
+
     try:
         for part in target["parts"]:
             p_start = part["start_byte"]
@@ -529,7 +545,15 @@ async def handle_stream(request: web.Request):
                     request_size=chunk_size,
                     limit=sub_length
                 ):
+                    if should_cache:
+                        collected_chunks.append(chunk)
                     await response.write(chunk)
+
+        if should_cache and collected_chunks:
+            full_data = b"".join(collected_chunks)
+            if len(STREAM_RANGE_CACHE) > MAX_RANGE_CACHE_ITEMS:
+                STREAM_RANGE_CACHE.clear()
+            STREAM_RANGE_CACHE[range_cache_key] = full_data
     except (asyncio.CancelledError, ConnectionResetError):
         pass
     except Exception as e:
@@ -661,69 +685,91 @@ async def handle_hls_segment(request: web.Request):
             record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
             return await serve_file_segment(request, cached_file)
 
-        # Generate segment with FFmpeg from local stream
-        info = await get_or_probe_file_info(chat_id, msg_id)
-        if not info:
-            return web.Response(text="Source video not found", status=404)
+        async with FFMPEG_SEMAPHORE:
+            # Check once more after acquiring global FFmpeg semaphore
+            if cached_file.exists() and cached_file.stat().st_size > 0:
+                record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
+                return await serve_file_segment(request, cached_file)
 
-        start_time = seg_idx * SEGMENT_DURATION
-        duration = SEGMENT_DURATION
-        temp_file = CACHE_DIR / f"temp_{cache_key}"
+            # Generate segment with FFmpeg from local stream
+            info = await get_or_probe_file_info(chat_id, msg_id)
+            if not info:
+                return web.Response(text="Source video not found", status=404)
 
-        stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
+            start_time = seg_idx * SEGMENT_DURATION
+            duration = SEGMENT_DURATION
+            temp_file = CACHE_DIR / f"temp_{cache_key}"
 
-        # Strategy 1: Fast stream copy (ultra fast < 50ms, direct H.264 slice)
-        success = False
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{start_time:.3f}",
-            "-i", stream_url,
-            "-t", f"{duration:.3f}",
-            "-c", "copy",
-            "-bsf:v", "h264_mp4toannexb",
-            "-f", "mpegts",
-            str(temp_file)
-        ]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-            )
-            await proc.communicate()
-            if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
-                success = True
-        except Exception as e:
-            logger.warning(f"Stream copy failed for segment {cache_key}: {e}")
+            stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
 
-        # Strategy 2: Fast re-encode if stream copy fails
-        if not success:
-            vf = []
-            if quality == "480p":
-                vf = ["-vf", "scale=-2:480"]
-            elif quality == "720p":
-                vf = ["-vf", "scale=-2:720"]
-            elif quality == "1080p":
-                vf = ["-vf", "scale=-2:1080"]
-
+            # Strategy 1: Fast stream copy (ultra fast < 50ms, direct H.264 slice)
+            success = False
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", f"{start_time:.3f}",
                 "-i", stream_url,
                 "-t", f"{duration:.3f}",
-                *vf,
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                "-c:a", "aac", "-b:a", "128k",
+                "-c", "copy",
+                "-bsf:v", "h264_mp4toannexb",
                 "-f", "mpegts",
                 str(temp_file)
             ]
+            proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
-                await proc.communicate()
+                await asyncio.wait_for(proc.communicate(), timeout=20.0)
                 if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
                     success = True
+            except asyncio.TimeoutError:
+                logger.warning(f"Stream copy timed out for segment {cache_key}")
+                if proc:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
             except Exception as e:
-                logger.error(f"Re-encode failed for segment {cache_key}: {e}")
+                logger.warning(f"Stream copy failed for segment {cache_key}: {e}")
+
+            # Strategy 2: Fast re-encode if stream copy fails
+            if not success:
+                vf = []
+                if quality == "480p":
+                    vf = ["-vf", "scale=-2:480"]
+                elif quality == "720p":
+                    vf = ["-vf", "scale=-2:720"]
+                elif quality == "1080p":
+                    vf = ["-vf", "scale=-2:1080"]
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{start_time:.3f}",
+                    "-i", stream_url,
+                    "-t", f"{duration:.3f}",
+                    *vf,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                    "-c:a", "aac", "-b:a", "128k",
+                    "-f", "mpegts",
+                    str(temp_file)
+                ]
+                proc = None
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await asyncio.wait_for(proc.communicate(), timeout=25.0)
+                    if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
+                        success = True
+                except asyncio.TimeoutError:
+                    logger.warning(f"Re-encode timed out for segment {cache_key}")
+                    if proc:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.error(f"Re-encode failed for segment {cache_key}: {e}")
 
         if success and temp_file.exists():
             temp_file.replace(cached_file)
@@ -772,9 +818,6 @@ async def serve_file_segment(request: web.Request, file_path: Path):
 
 async def handle_service_worker(request: web.Request):
     sw_code = """// Antigravity Ultra Video Service Worker
-const CACHE_NAME = 'tg-stream-v2';
-const MAX_PREFETCH = 2;
-
 self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
@@ -784,53 +827,8 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-
-  // Cache and prefetch video segments
-  if (url.pathname.includes('/hls/') && url.pathname.endsWith('.ts')) {
-    e.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(e.request);
-        if (cached) {
-          prefetchNextSegments(url.href, cache);
-          return cached;
-        }
-
-        try {
-          const res = await fetch(e.request);
-          if (res && res.status === 200) {
-            cache.put(e.request, res.clone());
-            prefetchNextSegments(url.href, cache);
-          }
-          return res;
-        } catch (err) {
-          return new Response('Segment fetch error', { status: 504 });
-        }
-      })
-    );
-  }
+  // Direct pass-through to let browser/Hls.js manage requests naturally
 });
-
-function prefetchNextSegments(currentUrl, cache) {
-  const match = currentUrl.match(/(.*\\/seg_)(\\d+)(\\.ts.*)/);
-  if (!match) return;
-
-  const prefix = match[1];
-  const curIdx = parseInt(match[2], 10);
-  const suffix = match[3];
-
-  for (let i = 1; i <= MAX_PREFETCH; i++) {
-    const nextIdx = curIdx + i;
-    const nextUrl = `${prefix}${nextIdx}${suffix}`;
-    cache.match(nextUrl).then((exists) => {
-      if (!exists) {
-        fetch(nextUrl).then((r) => {
-          if (r && r.status === 200) cache.put(nextUrl, r);
-        }).catch(() => {});
-      }
-    });
-  }
-}
 """
     return web.Response(
         text=sw_code,
@@ -1297,7 +1295,7 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
     }
 
     // Populate initial menu immediately on millisecond 0
-    setupQualityMenuFallback();
+    setupQualityMenuOptions('direct');
 
     function initPlayer() {
       // Ensure quality badge stays visible in native Fullscreen mode
@@ -1309,123 +1307,99 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       };
       if (video.webkitRequestFullscreen) video.webkitRequestFullscreen = video.requestFullscreen;
 
+      // Smart TV / Native Direct Stream Priority
+      // Direct stream plays original H.264/AAC with native hardware acceleration, zero CPU lag and smooth continuous buffering.
+      playDirect();
+    }
+
+    function playDirect() {
+      if (hlsInstance) {
+        try { hlsInstance.destroy(); } catch (e) {}
+        hlsInstance = null;
+      }
+      video.src = streamFallbackUrl;
+      setupQualityMenuOptions('direct');
+      video.load();
+      video.play().catch((err) => {
+        console.log('Autoplay deferred, waiting for user click:', err);
+      });
+    }
+
+    function playHls(targetUrl, levelLabel) {
       if (window.Hls && Hls.isSupported()) {
+        if (hlsInstance) {
+          try { hlsInstance.destroy(); } catch (e) {}
+        }
         const hls = new Hls({
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 40,
           enableWorker: true,
           lowLatencyMode: false,
-          backBufferLength: 30
+          backBufferLength: 20
         });
         hlsInstance = hls;
-
-        hls.loadSource(hlsUrl);
+        hls.loadSource(targetUrl || hlsUrl);
         hls.attachMedia(video);
-
         hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
-          console.log('HLS Manifest parsed, levels:', data.levels ? data.levels.length : 0);
-          if (data && data.levels && data.levels.length > 0) {
-            setupQualityMenu(data.levels);
-          }
-          video.play().catch((err) => {
-            console.log('Autoplay blocked or deferred:', err);
-          });
+          setupQualityMenuOptions('hls', levelLabel);
+          video.play().catch(() => {});
         });
-
         hls.on(Hls.Events.ERROR, (e, data) => {
           console.warn('HLS Error event:', data.type, data.details, 'fatal:', data.fatal);
           if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                console.log('HLS: Attempting to recover network error...');
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                console.log('HLS: Attempting to recover media error...');
-                hls.recoverMediaError();
-                break;
-              default:
-                console.warn('HLS: Unrecoverable fatal error, falling back to direct stream');
-                try { hls.destroy(); } catch (err) {}
-                hlsInstance = null;
-                video.src = streamFallbackUrl;
-                setupQualityMenuFallback();
-                video.load();
-                video.play().catch(() => {});
-                break;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else {
+              console.warn('HLS unrecoverable, falling back to Direct Stream');
+              playDirect();
             }
           }
         });
-
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = hlsUrl;
-        video.load();
-        video.play().catch(() => {});
       } else {
-        video.src = streamFallbackUrl;
-        setupQualityMenuFallback();
-        video.load();
-        video.play().catch(() => {});
+        playDirect();
       }
     }
 
-    function setupQualityMenu(levels) {
-      qualityMenu.innerHTML = '';
-
-      // Auto option
-      const autoItem = document.createElement('div');
-      autoItem.className = 'quality-item active';
-      autoItem.dataset.level = '-1';
-      autoItem.innerHTML = '<span class="check-icon">✓</span><span>Auto (อัตโนมัติ)</span>';
-      autoItem.onclick = () => setQuality(-1, 'Auto');
-      qualityMenu.appendChild(autoItem);
-
-      if (levels && levels.length > 0) {
-        levels.forEach((lvl, idx) => {
-          const item = document.createElement('div');
-          item.className = 'quality-item';
-          item.dataset.level = idx;
-          const name = lvl.name || (lvl.height ? `${lvl.height}p` : `Level ${idx + 1}`);
-          item.innerHTML = `<span class="check-icon">✓</span><span>${name}</span>`;
-          item.onclick = () => setQuality(idx, name);
-          qualityMenu.appendChild(item);
-        });
-      }
-    }
-
-    function setupQualityMenuFallback() {
+    function setupQualityMenuOptions(currentMode, activeLabel) {
       qualityMenu.innerHTML = '';
       const items = [
-        { level: -1, name: 'Auto (อัตโนมัติ)', label: 'Auto' },
-        { level: 0, name: '1080p (ต้นฉบับ)', label: '1080p' },
-        { level: 1, name: '720p (HD)', label: '720p' },
-        { level: 2, name: '480p (ประหยัดเน็ต)', label: '480p' }
+        { id: 'direct', label: '1080p (Direct)', name: '⚡ 1080p Original (เร็วที่สุด ไร้กระตุก)' },
+        { id: 'hls_1080', label: '1080p (HLS)', name: '1080p Full HD (HLS)' },
+        { id: 'hls_720', label: '720p (HD)', name: '720p HD (ประหยัดเน็ต)' },
+        { id: 'hls_480', label: '480p (SD)', name: '480p SD (เน็ตช้า)' }
       ];
-      items.forEach(it => {
+
+      items.forEach((it) => {
         const item = document.createElement('div');
-        item.className = 'quality-item' + (it.level === -1 ? ' active' : '');
-        item.dataset.level = it.level;
+        const isActive = (currentMode === 'direct' && it.id === 'direct') ||
+                         (currentMode === 'hls' && it.label === activeLabel);
+        item.className = 'quality-item' + (isActive ? ' active' : '');
         item.innerHTML = `<span class="check-icon">✓</span><span>${it.name}</span>`;
-        item.onclick = () => setQuality(it.level, it.label || it.name);
+        item.onclick = () => {
+          qualityLabel.innerText = it.label.split(' ')[0];
+          closeQualityMenu();
+          const t = video.currentTime;
+          if (it.id === 'direct') {
+            playDirect();
+          } else if (it.id === 'hls_720') {
+            playHls('/hls/__CHAT_ID__/__MSG_ID__/720p/index.m3u8', it.label);
+          } else if (it.id === 'hls_480') {
+            playHls('/hls/__CHAT_ID__/__MSG_ID__/480p/index.m3u8', it.label);
+          } else {
+            playHls(hlsUrl, it.label);
+          }
+          if (t > 0) {
+            video.currentTime = t;
+          }
+        };
         qualityMenu.appendChild(item);
       });
-    }
 
-    function setQuality(levelIndex, label) {
-      if (hlsInstance) {
-        hlsInstance.currentLevel = levelIndex;
+      if (currentMode === 'direct') {
+        qualityLabel.innerText = '1080p';
       }
-      qualityLabel.innerText = label.split(' ')[0];
-
-      document.querySelectorAll('.quality-item').forEach(el => {
-        if (parseInt(el.dataset.level, 10) === levelIndex) {
-          el.classList.add('active');
-        } else {
-          el.classList.remove('active');
-        }
-      });
-
-      closeQualityMenu();
     }
 
     function openQualityMenu() {
