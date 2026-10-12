@@ -1062,10 +1062,8 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>__FILE_NAME__</title>
   
-  <!-- HLS.js & P2P Media Loader (WebRTC Swarm) -->
-  <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-core@latest/build/p2p-media-loader-core.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-hlsjs@latest/build/p2p-media-loader-hlsjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+  <!-- Modern High-Compatibility HLS Engine -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1214,11 +1212,61 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
     .quality-item.active .check-icon {
       visibility: visible;
     }
+
+    /* Big Center Play Overlay for Smart TVs and Browsers */
+    .play-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 50;
+      cursor: pointer;
+      transition: opacity 0.25s ease;
+    }
+    .play-overlay.hidden {
+      display: none !important;
+    }
+    .play-btn-circle {
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.9);
+      border: 3px solid rgba(255, 255, 255, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.5);
+      transition: transform 0.2s, background 0.2s;
+      outline: none;
+      cursor: pointer;
+    }
+    .play-btn-circle:hover, .play-btn-circle:focus {
+      transform: scale(1.1);
+      background: #38bdf8;
+    }
+    .play-overlay-text {
+      margin-top: 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #f8fafc;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
   </style>
 </head>
 <body>
   <div id="player-container">
     <video id="video-player" playsinline controls autoplay preload="auto"></video>
+
+    <!-- Center Play/Resume Overlay Button -->
+    <div id="play-overlay" class="play-overlay">
+      <button class="play-btn-circle" id="play-overlay-btn" type="button" aria-label="Play">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="#ffffff" style="margin-left:4px;"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      </button>
+      <div class="play-overlay-text">กดเพื่อเริ่มเล่น (Play)</div>
+    </div>
 
     <!-- Floating Quality Control Badge (Top-Right) -->
     <div class="quality-wrap" id="quality-wrap">
@@ -1268,75 +1316,63 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       };
       if (video.webkitRequestFullscreen) video.webkitRequestFullscreen = video.requestFullscreen;
 
-      const isP2PSupported = !!(window.p2pml && p2pml.hlsjs && p2pml.hlsjs.Engine && p2pml.hlsjs.Engine.isSupported && p2pml.hlsjs.Engine.isSupported());
-
       if (window.Hls && Hls.isSupported()) {
-        let loaderClass = undefined;
-        if (isP2PSupported) {
-          try {
-            const engine = new p2pml.hlsjs.Engine({
-              segments: {
-                swarmId: 'stream___CHAT_ID_____MSG_ID__',
-                forwardSegmentCount: 20
-              },
-              loader: {
-                trackerAnnounce: [
-                  'wss://tracker.openwebtorrent.com',
-                  'wss://tracker.files.fm:7073/announce',
-                  'wss://tracker.novage.com.ua:443'
-                ],
-                rtcConfig: {
-                  iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478' }
-                  ]
-                }
-              }
-            });
-            loaderClass = engine.createLoaderClass();
-          } catch (e) {
-            console.warn('P2P engine error, falling back to standard loader:', e);
-          }
-        }
-
-        const hlsConfig = {
+        const hls = new Hls({
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          enableWorker: true
-        };
-        if (loaderClass) {
-          hlsConfig.loader = loaderClass;
-        }
-
-        const hls = new Hls(hlsConfig);
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 30
+        });
         hlsInstance = hls;
-
-        if (loaderClass && window.p2pml && p2pml.hlsjs) {
-          try { p2pml.hlsjs.initHlsJsPlayer(hls); } catch (e) {}
-        }
 
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+          console.log('HLS Manifest parsed, levels:', data.levels ? data.levels.length : 0);
           if (data && data.levels && data.levels.length > 0) {
             setupQualityMenu(data.levels);
           }
+          video.play().catch((err) => {
+            console.log('Autoplay blocked or deferred:', err);
+          });
         });
 
         hls.on(Hls.Events.ERROR, (e, data) => {
+          console.warn('HLS Error event:', data.type, data.details, 'fatal:', data.fatal);
           if (data.fatal) {
-            console.warn('HLS fatal error, falling back to direct stream:', data);
-            video.src = streamFallbackUrl;
-            setupQualityMenuFallback();
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.log('HLS: Attempting to recover network error...');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.log('HLS: Attempting to recover media error...');
+                hls.recoverMediaError();
+                break;
+              default:
+                console.warn('HLS: Unrecoverable fatal error, falling back to direct stream');
+                try { hls.destroy(); } catch (err) {}
+                hlsInstance = null;
+                video.src = streamFallbackUrl;
+                setupQualityMenuFallback();
+                video.load();
+                video.play().catch(() => {});
+                break;
+            }
           }
         });
 
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = hlsUrl;
+        video.load();
+        video.play().catch(() => {});
       } else {
         video.src = streamFallbackUrl;
         setupQualityMenuFallback();
+        video.load();
+        video.play().catch(() => {});
       }
     }
 
@@ -1437,14 +1473,32 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       }, 4000);
     }
 
+    const playOverlay = document.getElementById('play-overlay');
+    function updatePlayOverlay() {
+      if (video.paused) {
+        playOverlay.classList.remove('hidden');
+      } else {
+        playOverlay.classList.add('hidden');
+      }
+    }
+
     document.addEventListener('mousemove', wakeControl);
     document.addEventListener('touchstart', wakeControl);
-    video.addEventListener('play', wakeControl);
+    video.addEventListener('play', () => {
+      wakeControl();
+      updatePlayOverlay();
+    });
+    video.addEventListener('playing', updatePlayOverlay);
     video.addEventListener('pause', () => {
       qualityWrap.classList.remove('fade-out');
       clearTimeout(idleTimer);
+      updatePlayOverlay();
+    });
+    playOverlay.addEventListener('click', () => {
+      video.play().catch(e => console.log('Overlay play error:', e));
     });
     wakeControl();
+    updatePlayOverlay();
 
     // Keyboard Shortcuts & Double-click Fullscreen
     document.addEventListener('keydown', (e) => {
