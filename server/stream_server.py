@@ -516,12 +516,12 @@ async def handle_stream(request: web.Request):
     range_cache_key = (real_cid, msg_id, start, end)
     if length <= 5 * 1024 * 1024 and range_cache_key in STREAM_RANGE_CACHE:
         cached_data = STREAM_RANGE_CACHE[range_cache_key]
-        headers["Content-Length"] = str(len(cached_data))
-        response = web.StreamResponse(status=status, headers=headers)
-        await response.prepare(request)
-        await response.write(cached_data)
-        await response.write_eof()
-        return response
+        if len(cached_data) == length:
+            response = web.StreamResponse(status=status, headers=headers)
+            await response.prepare(request)
+            await response.write(cached_data)
+            await response.write_eof()
+            return response
 
     response = web.StreamResponse(status=status, headers=headers)
     await response.prepare(request)
@@ -539,21 +539,31 @@ async def handle_stream(request: web.Request):
             if overlap_start <= overlap_end:
                 sub_offset = overlap_start - p_start
                 sub_length = overlap_end - overlap_start + 1
+                bytes_remaining = sub_length
+
                 async for chunk in client.iter_download(
                     part["msg"].media,
                     offset=sub_offset,
-                    request_size=chunk_size,
-                    limit=sub_length
+                    request_size=chunk_size
                 ):
+                    if len(chunk) > bytes_remaining:
+                        chunk = chunk[:bytes_remaining]
+
                     if should_cache:
                         collected_chunks.append(chunk)
+
                     await response.write(chunk)
+                    bytes_remaining -= len(chunk)
+
+                    if bytes_remaining <= 0:
+                        break
 
         if should_cache and collected_chunks:
             full_data = b"".join(collected_chunks)
-            if len(STREAM_RANGE_CACHE) > MAX_RANGE_CACHE_ITEMS:
-                STREAM_RANGE_CACHE.clear()
-            STREAM_RANGE_CACHE[range_cache_key] = full_data
+            if len(full_data) == length:
+                if len(STREAM_RANGE_CACHE) > MAX_RANGE_CACHE_ITEMS:
+                    STREAM_RANGE_CACHE.clear()
+                STREAM_RANGE_CACHE[range_cache_key] = full_data
     except (asyncio.CancelledError, ConnectionResetError):
         pass
     except Exception as e:
