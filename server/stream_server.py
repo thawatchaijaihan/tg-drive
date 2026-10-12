@@ -565,18 +565,12 @@ async def handle_hls_master(request: web.Request):
     lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION={w}x{h},CODECS="avc1.640028,mp4a.40.2",NAME="Auto (Original)"')
     lines.append(f"/hls/{chat_id}/{msg_id}/source/index.m3u8")
 
-    # Pre-transcoded or on-demand renditions
-    if "1080p" in qualities or h >= 1080:
-        lines.append('#EXT-X-STREAM-INF:BANDWIDTH=3500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",NAME="1080p (Full HD)"')
-        lines.append(f"/hls/{chat_id}/{msg_id}/1080p/index.m3u8")
-
-    if "720p" in qualities or h >= 720:
-        lines.append('#EXT-X-STREAM-INF:BANDWIDTH=1800000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",NAME="720p (HD)"')
-        lines.append(f"/hls/{chat_id}/{msg_id}/720p/index.m3u8")
-
-    if "480p" in qualities or h >= 480:
-        lines.append('#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480,CODECS="avc1.640028,mp4a.40.2",NAME="480p (SD)"')
-        lines.append(f"/hls/{chat_id}/{msg_id}/480p/index.m3u8")
+    # Only advertise other renditions if they have been pre-transcoded on disk!
+    for q, b, res in [("1080p", 3500000, "1920x1080"), ("720p", 1800000, "1280x720"), ("480p", 800000, "854x480")]:
+        transcoded_dir = TRANSCODE_DIR / f"{chat_id}_{msg_id}_{q}"
+        if transcoded_dir.exists() and (transcoded_dir / "index.m3u8").exists():
+            lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={b},RESOLUTION={res},CODECS="avc1.640028,mp4a.40.2",NAME="{q}"')
+            lines.append(f"/hls/{chat_id}/{msg_id}/{q}/index.m3u8")
 
     m3u8_content = "\n".join(lines) + "\n"
     return web.Response(
@@ -678,38 +672,37 @@ async def handle_hls_segment(request: web.Request):
 
         stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
 
-        # Strategy 1: Stream copy for source (super fast < 50ms)
+        # Strategy 1: Fast stream copy (ultra fast < 50ms, direct H.264 slice)
         success = False
-        if quality in ("source", "auto", "default"):
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", f"{start_time:.3f}",
-                "-i", stream_url,
-                "-t", f"{duration:.3f}",
-                "-c", "copy",
-                "-bsf:v", "h264_mp4toannexb",
-                "-f", "mpegts",
-                str(temp_file)
-            ]
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
-                await proc.communicate()
-                if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
-                    success = True
-            except Exception as e:
-                logger.warning(f"Stream copy failed for segment {cache_key}: {e}")
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start_time:.3f}",
+            "-i", stream_url,
+            "-t", f"{duration:.3f}",
+            "-c", "copy",
+            "-bsf:v", "h264_mp4toannexb",
+            "-f", "mpegts",
+            str(temp_file)
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+            await proc.communicate()
+            if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
+                success = True
+        except Exception as e:
+            logger.warning(f"Stream copy failed for segment {cache_key}: {e}")
 
-        # Strategy 2: Fast re-encode if stream copy fails or for specific qualities
+        # Strategy 2: Fast re-encode if stream copy fails
         if not success:
             vf = []
             if quality == "480p":
-                vf = ["-vf", "scale=w=854:h=480:force_original_aspect_ratio=decrease"]
+                vf = ["-vf", "scale=-2:480"]
             elif quality == "720p":
-                vf = ["-vf", "scale=w=1280:h=720:force_original_aspect_ratio=decrease"]
+                vf = ["-vf", "scale=-2:720"]
             elif quality == "1080p":
-                vf = ["-vf", "scale=w=1920:h=1080:force_original_aspect_ratio=decrease"]
+                vf = ["-vf", "scale=-2:1080"]
 
             cmd = [
                 "ffmpeg", "-y",
