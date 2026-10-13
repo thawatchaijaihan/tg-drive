@@ -579,19 +579,21 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GAPT-CINEMA — ศูนย์รวมภาพยนตร์ออนไลน์</title>
+  <title>GAPT-CINEMA — ศูนย์รวมภาพยนตร์ออนไลน์ Ultra Stream</title>
   <link rel="icon" type="image/png" href="/cinema-icon.png?v=2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Noto+Sans+Thai:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #07090e;
-      --surface: rgba(15, 23, 42, 0.7);
-      --surface-border: rgba(255, 255, 255, 0.08);
-      --primary: #38bdf8;
-      --primary-glow: rgba(56, 189, 248, 0.35);
-      --accent: #818cf8;
+      --surface: rgba(15, 23, 42, 0.75);
+      --surface-border: rgba(255, 255, 255, 0.09);
+      --primary: #e50914;
+      --primary-hover: #f40612;
+      --primary-glow: rgba(229, 9, 20, 0.5);
+      --accent: #38bdf8;
+      --gold: #f59e0b;
       --text: #f8fafc;
       --text-muted: #94a3b8;
     }
@@ -603,23 +605,29 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       min-height: 100vh;
       overflow-x: hidden;
       background-image: 
-        radial-gradient(ellipse at 15% 0%, rgba(56, 189, 248, 0.12), transparent 50%),
-        radial-gradient(ellipse at 85% 15%, rgba(129, 140, 248, 0.08), transparent 50%);
+        radial-gradient(ellipse at 15% 0%, rgba(229, 9, 20, 0.08), transparent 50%),
+        radial-gradient(ellipse at 85% 15%, rgba(56, 189, 248, 0.06), transparent 50%);
     }
-    /* Header */
+
+    /* Sticky Navigation Bar */
     header {
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(7, 9, 14, 0.85);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: rgba(7, 9, 14, 0.88);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--surface-border);
-      padding: 14px 28px;
+      padding: 12px 36px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 20px;
+      gap: 24px;
+    }
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 32px;
     }
     .brand {
       display: flex;
@@ -630,13 +638,13 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       cursor: pointer;
     }
     .brand-icon {
-      width: 40px; height: 40px;
+      width: 42px; height: 42px;
       display: flex; align-items: center; justify-content: center;
-      filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.5));
+      filter: drop-shadow(0 0 16px rgba(229, 9, 20, 0.6));
       transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .brand:hover .brand-icon {
-      transform: scale(1.12) rotate(-4deg);
+      transform: scale(1.1) rotate(-3deg);
     }
     .brand-icon img {
       width: 36px;
@@ -645,225 +653,286 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       display: block;
     }
     .brand-name {
-      font-size: 1.35rem;
+      font-size: 1.45rem;
       font-weight: 900;
       letter-spacing: 0.04em;
-      background: linear-gradient(135deg, #FFFDE0 0%, #FDE047 25%, #F59E0B 70%, #D97706 100%);
+      background: linear-gradient(135deg, #ffffff 0%, #ff8b8e 40%, #e50914 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.55));
+      filter: drop-shadow(0 0 16px rgba(229, 9, 20, 0.4));
       text-transform: uppercase;
-      transition: filter 0.25s ease;
     }
-    .brand:hover .brand-name {
-      filter: drop-shadow(0 0 24px rgba(250, 204, 21, 0.85));
-    }
-    .search-container {
-      flex: 1;
-      max-width: 480px;
-      position: relative;
-    }
-    .search-input {
-      width: 100%;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--surface-border);
-      border-radius: 9999px;
-      padding: 10px 20px 10px 42px;
-      color: #fff;
-      font-size: 0.95rem;
-      outline: none;
-      transition: all 0.2s ease;
-    }
-    .search-input:focus {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: var(--primary);
-      box-shadow: 0 0 16px var(--primary-glow);
-    }
-    .search-icon {
-      position: absolute;
-      left: 16px; top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      pointer-events: none;
-    }
-    .header-links {
+    .nav-links {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 18px;
     }
-    .btn-drive {
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: color 0.2s;
+      cursor: pointer;
+    }
+    .nav-link:hover, .nav-link.active {
+      color: #fff;
+    }
+    .nav-link.badge-link {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
+      gap: 6px;
+      padding: 5px 12px;
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid var(--surface-border);
       border-radius: 9999px;
-      color: var(--text);
-      text-decoration: none;
-      font-size: 0.85rem;
-      font-weight: 600;
-      transition: all 0.2s;
+      font-size: 0.8rem;
     }
-    .btn-drive:hover {
+    .nav-link.badge-link:hover {
       background: rgba(255, 255, 255, 0.12);
       border-color: rgba(255, 255, 255, 0.2);
     }
 
-    /* Featured Hero Section */
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .search-container {
+      position: relative;
+      width: 260px;
+    }
+    .search-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--surface-border);
+      border-radius: 9999px;
+      padding: 9px 18px 9px 40px;
+      color: #fff;
+      font-size: 0.88rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .search-input:focus {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--primary);
+      box-shadow: 0 0 16px var(--primary-glow);
+      width: 300px;
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    /* Featured Hero Banner (Netflix / OTT Immersive Style) */
     .hero-container {
       position: relative;
       width: 100%;
-      min-height: 480px;
+      min-height: 520px;
+      height: 68vh;
+      max-height: 720px;
       display: flex;
       align-items: flex-end;
-      padding: 40px 48px;
+      padding: 50px 48px;
       background-size: cover;
       background-position: center 25%;
       background-repeat: no-repeat;
       overflow: hidden;
+      transition: background-image 0.5s ease-in-out;
     }
     .hero-mask {
       position: absolute;
       inset: 0;
       background: 
-        linear-gradient(to right, rgba(7, 9, 14, 0.95) 20%, rgba(7, 9, 14, 0.7) 60%, rgba(7, 9, 14, 0.3) 100%),
-        linear-gradient(to top, rgba(7, 9, 14, 1) 0%, transparent 60%);
+        linear-gradient(to right, rgba(7, 9, 14, 0.96) 20%, rgba(7, 9, 14, 0.72) 55%, rgba(7, 9, 14, 0.25) 100%),
+        linear-gradient(to top, rgba(7, 9, 14, 1) 0%, rgba(7, 9, 14, 0.6) 25%, transparent 65%),
+        linear-gradient(to bottom, rgba(7, 9, 14, 0.7) 0%, transparent 20%);
       pointer-events: none;
     }
     .hero-body {
       position: relative;
       z-index: 10;
-      max-width: 680px;
+      max-width: 720px;
     }
     .hero-tags {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 10px;
+      margin-bottom: 16px;
     }
     .tag {
-      padding: 4px 10px;
+      padding: 4px 12px;
       border-radius: 6px;
       font-size: 0.75rem;
-      font-weight: 700;
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
-    .tag-primary { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
-    .tag-gold { background: rgba(234, 179, 8, 0.18); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
-    .tag-green { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .tag-imdb { background: rgba(245, 158, 11, 0.2); color: #facc15; border: 1px solid rgba(245, 158, 11, 0.5); }
+    .tag-year { background: rgba(255, 255, 255, 0.12); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); }
+    .tag-faststart { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); }
+    .tag-quality { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+    
     .hero-title {
-      font-size: 2.75rem;
-      font-weight: 800;
-      line-height: 1.15;
-      margin-bottom: 14px;
-      text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
+      font-size: clamp(2.4rem, 5.2vw, 4rem);
+      font-weight: 900;
+      line-height: 1.1;
+      margin-bottom: 16px;
+      color: #ffffff;
+      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9), 0 1px 4px rgba(0,0,0,0.8);
+      letter-spacing: -0.01em;
     }
     .hero-overview {
-      color: #cbd5e1;
-      font-size: 0.95rem;
-      line-height: 1.6;
-      margin-bottom: 24px;
+      color: #e2e8f0;
+      font-size: 1rem;
+      line-height: 1.65;
+      margin-bottom: 28px;
       display: -webkit-box;
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+      max-width: 640px;
     }
     .hero-actions {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
       flex-wrap: wrap;
     }
     .btn-play-hero {
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      background: linear-gradient(135deg, #e50914 0%, #b81d24 100%);
       color: #fff;
-      padding: 13px 28px;
+      padding: 14px 32px;
       border-radius: 9999px;
-      font-size: 1rem;
-      font-weight: 700;
+      font-size: 1.05rem;
+      font-weight: 800;
       text-decoration: none;
       box-shadow: 0 4px 25px var(--primary-glow);
-      transition: all 0.25s ease;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: pointer;
       border: none;
     }
     .btn-play-hero:hover {
-      transform: translateY(-2px) scale(1.02);
-      box-shadow: 0 8px 32px rgba(56, 189, 248, 0.5);
+      transform: translateY(-2px) scale(1.03);
+      box-shadow: 0 8px 35px rgba(229, 9, 20, 0.7);
+      background: linear-gradient(135deg, #f40612 0%, #cc0000 100%);
     }
     .btn-secondary {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       color: #fff;
-      padding: 13px 22px;
+      padding: 14px 24px;
       border-radius: 9999px;
       font-size: 0.95rem;
-      font-weight: 600;
+      font-weight: 700;
       text-decoration: none;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       transition: all 0.2s ease;
       cursor: pointer;
     }
     .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.22);
+      transform: translateY(-1px);
+    }
+
+    /* Platform Slogan / Features Bar */
+    .slogan-bar {
+      background: rgba(15, 23, 42, 0.5);
+      border-top: 1px solid var(--surface-border);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 16px 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .slogan-text {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .slogan-highlight {
+      color: #ef4444;
+      font-weight: 800;
+    }
+    .feature-pills {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     /* Main Content */
     main {
-      padding: 36px 48px 60px;
+      padding: 40px 48px 70px;
     }
     .section-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 28px;
       flex-wrap: wrap;
       gap: 16px;
     }
     .section-title {
-      font-size: 1.4rem;
-      font-weight: 700;
+      font-size: 1.5rem;
+      font-weight: 800;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+      color: #fff;
     }
     .filter-tabs {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
     .tab-btn {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--surface-border);
       color: var(--text-muted);
-      padding: 6px 14px;
+      padding: 8px 16px;
       border-radius: 9999px;
-      font-size: 0.82rem;
+      font-size: 0.85rem;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
     }
     .tab-btn.active, .tab-btn:hover {
-      background: rgba(56, 189, 248, 0.12);
+      background: rgba(229, 9, 20, 0.15);
       border-color: var(--primary);
-      color: var(--primary);
+      color: #ff8b8e;
     }
 
     /* Movies Grid */
     .movies-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-      gap: 24px;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 26px;
     }
     .movie-card {
       background: var(--surface);
@@ -881,7 +950,7 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     .movie-card:hover, .movie-card:focus {
       transform: translateY(-8px);
       border-color: var(--primary);
-      box-shadow: 0 20px 35px -10px rgba(56, 189, 248, 0.25);
+      box-shadow: 0 20px 40px -10px rgba(229, 9, 20, 0.35);
       outline: none;
     }
     .poster-wrap {
@@ -897,28 +966,28 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       transition: transform 0.4s ease;
     }
     .movie-card:hover .poster-img {
-      transform: scale(1.06);
+      transform: scale(1.08);
     }
     .card-badge {
       position: absolute;
       top: 10px; left: 10px;
-      padding: 3px 8px;
+      padding: 4px 8px;
       border-radius: 6px;
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(0, 0, 0, 0.75);
       backdrop-filter: blur(6px);
-      font-size: 0.7rem;
-      font-weight: 700;
+      font-size: 0.72rem;
+      font-weight: 800;
       color: #facc15;
       display: flex; align-items: center; gap: 4px;
     }
     .faststart-pill {
       position: absolute;
       top: 10px; right: 10px;
-      padding: 3px 8px;
+      padding: 4px 8px;
       border-radius: 6px;
-      background: rgba(16, 185, 129, 0.85);
+      background: rgba(16, 185, 129, 0.9);
       backdrop-filter: blur(6px);
-      font-size: 0.65rem;
+      font-size: 0.68rem;
       font-weight: 800;
       color: #fff;
       text-transform: uppercase;
@@ -938,10 +1007,10 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       opacity: 1;
     }
     .play-btn-circle {
-      width: 54px; height: 54px;
+      width: 58px; height: 58px;
       border-radius: 50%;
-      background: rgba(56, 189, 248, 0.95);
-      box-shadow: 0 0 25px rgba(56, 189, 248, 0.6);
+      background: linear-gradient(135deg, #e50914, #b81d24);
+      box-shadow: 0 0 30px rgba(229, 9, 20, 0.8);
       display: flex; align-items: center; justify-content: center;
       transform: scale(0.85);
       transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -950,33 +1019,35 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       transform: scale(1);
     }
     .play-btn-circle svg {
-      width: 24px; height: 24px;
+      width: 26px; height: 26px;
       fill: #fff;
       margin-left: 3px;
     }
     .card-meta {
-      padding: 14px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
       flex: 1;
     }
     .card-title {
-      font-size: 0.95rem;
+      font-size: 1rem;
       font-weight: 700;
-      line-height: 1.3;
+      line-height: 1.35;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      color: #f8fafc;
     }
     .card-sub {
       display: flex;
       align-items: center;
       justify-content: space-between;
       color: var(--text-muted);
-      font-size: 0.78rem;
+      font-size: 0.8rem;
       margin-top: auto;
+      font-weight: 500;
     }
 
     /* Toast Notification */
@@ -986,10 +1057,10 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       background: rgba(16, 185, 129, 0.95);
       backdrop-filter: blur(8px);
       color: #fff;
-      padding: 12px 20px;
+      padding: 14px 24px;
       border-radius: 12px;
-      font-weight: 600;
-      font-size: 0.9rem;
+      font-weight: 700;
+      font-size: 0.95rem;
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
       transform: translateY(100px);
       opacity: 0;
@@ -1002,40 +1073,62 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     }
 
     /* Responsive */
-    @media (max-width: 768px) {
-      header { padding: 12px 16px; flex-wrap: wrap; }
-      .search-container { order: 3; max-width: 100%; width: 100%; margin-top: 8px; }
-      .hero-container { padding: 24px 20px; min-height: 380px; }
-      .hero-title { font-size: 1.85rem; }
-      main { padding: 24px 16px 40px; }
+    @media (max-width: 900px) {
+      header { padding: 12px 20px; }
+      .nav-links { display: none; }
+      .hero-container { padding: 36px 24px; min-height: 440px; height: auto; }
+      .hero-title { font-size: 2.2rem; }
+      .slogan-bar { padding: 14px 20px; }
+      main { padding: 28px 20px 50px; }
+    }
+    @media (max-width: 600px) {
+      .hero-container { min-height: 400px; padding: 24px 18px; }
+      .hero-title { font-size: 1.75rem; }
+      .hero-overview { font-size: 0.88rem; -webkit-line-clamp: 2; }
       .movies-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+      .card-meta { padding: 10px; }
+      .card-title { font-size: 0.88rem; }
+      .search-container { width: 160px; }
+      .search-input:focus { width: 200px; }
     }
   </style>
 </head>
 <body>
-  <!-- Header Bar -->
+  <!-- Header Navigation -->
   <header>
-    <a href="/" class="brand">
-      <div class="brand-icon">
-        <img src="/cinema-icon.png?v=2" alt="GAPT-CINEMA">
+    <div class="nav-left">
+      <a href="/" class="brand">
+        <div class="brand-icon">
+          <img src="/cinema-icon.png?v=2" alt="GAPT-CINEMA">
+        </div>
+        <div class="brand-name">GAPT-CINEMA</div>
+      </a>
+      <nav class="nav-links">
+        <a class="nav-link active" onclick="filterCategory('all', null)">หน้าหลัก</a>
+        <a class="nav-link" onclick="filterCategory('thai', null)">ภาพยนตร์ไทย</a>
+        <a class="nav-link" onclick="filterCategory('faststart', null)">⚡ Faststart พร้อมดู</a>
+        <a href="https://drive.capt-th.work/" target="_blank" class="nav-link badge-link">
+          <span>📁</span> TG-Drive Cloud
+        </a>
+      </nav>
+    </div>
+    <div class="nav-right">
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
       </div>
-      <div class="brand-name">GAPT-CINEMA</div>
-    </a>
-    <div class="search-container">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาชื่อภาพยนตร์, ซีรีส์..." autocomplete="off">
     </div>
   </header>
 
-  <!-- Featured Hero Banner (Dynamic) -->
+  <!-- Featured Hero Banner (Netflix / OTT Immersive Style) -->
   <div class="hero-container" id="heroBanner" style="background-image: url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1920&auto=format&fit=crop');">
     <div class="hero-mask"></div>
     <div class="hero-body">
       <div class="hero-tags">
-        <span class="tag tag-primary">★ 8.5/10 TMDB</span>
-        <span class="tag tag-gold">2024</span>
-        <span class="tag tag-green">⚡ Faststart พร้อมดู</span>
-        <span class="tag" style="background: rgba(255,255,255,0.1); color: #fff;">1080p Full HD</span>
+        <span class="tag tag-imdb" id="heroRating">★ 8.5 IMDB</span>
+        <span class="tag tag-year" id="heroYear">2024</span>
+        <span class="tag tag-faststart">⚡ ULTRA STREAM</span>
+        <span class="tag tag-quality" id="heroQuality">1080P FULL HD</span>
       </div>
       <h1 class="hero-title" id="heroTitle">ธี่หยด สมิงเขาขวาง</h1>
       <p class="hero-overview" id="heroOverview">
@@ -1043,10 +1136,31 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       </p>
       <div class="hero-actions">
         <a id="heroPlayBtn" href="/watch/4381915212/11" class="btn-play-hero">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          เริ่มเล่นภาพยนตร์
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          ดูภาพยนตร์
+        </a>
+        <button onclick="copyCurrentHeroStream()" class="btn-secondary">
+          <span>🔗</span> คัดลอกลิงก์สตรีม
+        </button>
+        <a href="https://drive.capt-th.work/" target="_blank" class="btn-secondary">
+          <span>📁</span> เปิดใน TG-Drive
         </a>
       </div>
+    </div>
+  </div>
+
+  <!-- Platform Slogan & Highlights -->
+  <div class="slogan-bar">
+    <div class="slogan-text">
+      <span>🍿</span>
+      <span>GAPT-CINEMA — ศูนย์รวมภาพยนตร์ออนไลน์ความเร็วสูง <span class="slogan-highlight">ไร้โฆษณากวนใจ 100%</span></span>
+    </div>
+    <div class="feature-pills">
+      <span class="pill">🛡️ ไร้มัลแวร์</span>
+      <span class="pill">•</span>
+      <span class="pill">⚡ Ultra Stream Faststart</span>
+      <span class="pill">•</span>
+      <span class="pill">🔊 เสียงใสเต็ม Bitrate</span>
     </div>
   </div>
 
@@ -1054,11 +1168,12 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
   <main>
     <div class="section-head">
       <h2 class="section-title">
-        <span>🍿</span> ภาพยนตร์และวิดีโอทั้งหมด <span id="movieCount" style="color: var(--primary); font-size: 1rem; font-weight: 500;"></span>
+        <span>🎬</span> รายการภาพยนตร์ทั้งหมด <span id="movieCount" style="color: #ff8b8e; font-size: 1rem; font-weight: 600;"></span>
       </h2>
       <div class="filter-tabs">
         <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
         <button class="tab-btn" onclick="filterCategory('thai', this)">ภาพยนตร์ไทย</button>
+        <button class="tab-btn" onclick="filterCategory('faststart', this)">⚡ Faststart พร้อมดู</button>
       </div>
     </div>
 
@@ -1073,6 +1188,7 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
   <script>
     var allMovies = __INITIAL_MOVIES_JSON__;
     var currentFilter = 'all';
+    var currentHeroMovie = null;
 
     function renderMovies(movies) {
       var grid = document.getElementById('moviesGrid');
@@ -1132,15 +1248,23 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     function filterCategory(cat, btn) {
       currentFilter = cat;
       document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-      if (btn) btn.classList.add('active');
+      if (btn) {
+        btn.classList.add('active');
+      } else {
+        var allBtns = document.querySelectorAll('.tab-btn');
+        if (cat === 'all' && allBtns[0]) allBtns[0].classList.add('active');
+        if (cat === 'thai' && allBtns[1]) allBtns[1].classList.add('active');
+        if (cat === 'faststart' && allBtns[2]) allBtns[2].classList.add('active');
+      }
       applyFilter();
     }
 
-    function copyStream(url) {
-      var fullUrl = window.location.origin + url;
+    function copyCurrentHeroStream() {
+      if (!currentHeroMovie || !currentHeroMovie.watch_url) return;
+      var fullUrl = window.location.origin + currentHeroMovie.watch_url;
       navigator.clipboard.writeText(fullUrl).then(function() {
         var t = document.getElementById('toast');
-        t.innerText = 'คัดลอกลิงก์สตรีมสำเร็จ! นำไปเปิดใน VLC หรือ Player ได้ทันที';
+        t.innerText = 'คัดลอกลิงก์สตรีมสำเร็จ! นำไปเปิดใน VLC หรือส่งต่อได้ทันที';
         t.className = 'show';
         setTimeout(function() { t.className = ''; }, 3000);
       });
@@ -1151,15 +1275,29 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     // Initial render & sync hero banner with active movie
     if (allMovies && allMovies.length > 0) {
       var hero = allMovies[0];
+      currentHeroMovie = hero;
+
       var ht = document.getElementById('heroTitle');
       if (ht) ht.innerText = hero.title;
+
       var ho = document.getElementById('heroOverview');
       if (ho && hero.overview) ho.innerText = hero.overview;
+
       var hb = document.getElementById('heroPlayBtn');
       if (hb && hero.watch_url) hb.href = hero.watch_url;
-      if (hero.backdrop_url) {
-        var hbg = document.querySelector('.hero-bg');
-        if (hbg) hbg.style.backgroundImage = 'url(' + hero.backdrop_url + ')';
+
+      var hr = document.getElementById('heroRating');
+      if (hr && hero.vote_average) hr.innerText = '★ ' + hero.vote_average.toFixed(1) + ' IMDB';
+
+      var hy = document.getElementById('heroYear');
+      if (hy && hero.release_date) hy.innerText = hero.release_date;
+
+      var hq = document.getElementById('heroQuality');
+      if (hq) hq.innerText = (hero.duration_formatted ? hero.duration_formatted + ' • ' : '') + '1080P FULL HD';
+
+      var hBanner = document.getElementById('heroBanner');
+      if (hBanner && (hero.backdrop_url || hero.poster_url)) {
+        hBanner.style.backgroundImage = 'url(' + (hero.backdrop_url || hero.poster_url) + ')';
       }
     }
     renderMovies(allMovies);
