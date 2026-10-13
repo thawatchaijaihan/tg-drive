@@ -47,11 +47,29 @@ if not API_ID or not API_HASH:
     sys.exit(1)
 
 CACHE_DIR = BASE_DIR / "cache" / "segments"
+FASTSTART_DIR = BASE_DIR / "cache" / "faststart"
 TRANSCODE_DIR = BASE_DIR / "transcoded"
 DB_PATH = BASE_DIR / "tg_stream.db"
+CINEMA_ICON_PATH = BASE_DIR / "cinema-icon.png"
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+FASTSTART_DIR.mkdir(parents=True, exist_ok=True)
 TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_faststart_path(chat_id: int, msg_id: int):
+    clean_id = str(abs(chat_id))
+    if clean_id.startswith("100") and len(clean_id) > 10:
+        clean_id = clean_id[3:]
+    candidates = [
+        FASTSTART_DIR / f"{clean_id}_{msg_id}.mp4",
+        FASTSTART_DIR / f"{chat_id}_{msg_id}.mp4",
+        FASTSTART_DIR / f"{abs(chat_id)}_{msg_id}.mp4",
+    ]
+    for c in candidates:
+        if c.exists() and not c.name.endswith(".tmp") and c.stat().st_size > 1024 * 1024:
+            return c
+    return None
+
 
 MAX_CACHE_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB LRU cache
 SEGMENT_DURATION = 6.0  # 6-second HLS segments
@@ -426,11 +444,729 @@ async def get_or_probe_file_info(chat_id: int, msg_id: int):
     save_db_video(chat_id, msg_id, info)
     return info
 
+# ─── CINEMA PORTAL & MOVIE DASHBOARD ──────────────────────────────────────────
+
+KNOWN_MOVIES_METADATA = {
+    "ธี่หยด": {
+        "title": "ธี่หยด 2 (สมิงเขาขวาง)",
+        "original_title": "Death Whisperer 2 (2024)",
+        "overview": "3 ปีหลังจากการเสียชีวิตของแย้ม 'ยักษ์' ยังคงออกตามล่าวิญญาณชุดดำอย่างไม่ลดละ จนกระทั่งพบเบาะแสว่ามีผีชุดดำสิงสู่ในดงโขมดป่าลึก ยักษ์จึงต้องร่วมมือกับจ่าปันเพื่อปิดบัญชีแค้นก่อนที่ความตายจะพรากคนที่เขารักไปอีกครั้ง",
+        "poster_url": "https://image.tmdb.org/t/p/w500/A0fHnpVX8vYQCmvETllWJQ30Mi6.jpg",
+        "backdrop_url": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1920&auto=format&fit=crop",
+        "release_date": "2024",
+        "vote_average": 8.5,
+        "category": "ภาพยนตร์ไทย"
+    },
+    "mood booster": {
+        "title": "Mood Booster — Ultra 4K Concert",
+        "original_title": "Mood Booster",
+        "overview": "รวมมิวสิควิดีโอและคอนเสิร์ตเสียงคมชัดระดับพรีเมียมจาก Telegram Cloud Storage",
+        "poster_url": "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=60",
+        "backdrop_url": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1920&auto=format&fit=crop&q=80",
+        "release_date": "2024",
+        "vote_average": 7.8,
+        "category": "คอนเสิร์ต"
+    },
+    "big_buck_bunny": {
+        "title": "Big Buck Bunny 4K Remaster",
+        "original_title": "Big Buck Bunny",
+        "overview": "แอนิเมชันความละเอียดสูงสำหรับทดสอบระบบภาพ HDR และเสียงรอบทิศทาง",
+        "poster_url": "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=500&auto=format&fit=crop&q=60",
+        "backdrop_url": "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1920&auto=format&fit=crop&q=80",
+        "release_date": "2023",
+        "vote_average": 7.5,
+        "category": "แอนิเมชัน"
+    }
+}
+
+def format_movie_duration(secs: float) -> str:
+    if not secs or secs <= 0:
+        return ""
+    m, s = divmod(int(secs), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m"
+    return f"{m}m {s:02d}s"
+
+def format_movie_size(b: int) -> str:
+    if not b:
+        return "0 MB"
+    if b >= 1024 * 1024 * 1024:
+        return f"{b / (1024*1024*1024):.2f} GB"
+    return f"{b / (1024*1024):.1f} MB"
+
+def get_all_movies():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT chat_id, msg_id, file_name, file_size, duration
+        FROM videos
+        WHERE (mime_type LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mkv')
+        ORDER BY updated_at DESC, duration DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+
+    seen_names = set()
+    movies = []
+
+    for chat_id, msg_id, file_name, file_size, duration in rows:
+        norm_key = file_name.lower().replace(".mp4", "").replace(".mkv", "").strip()
+        if norm_key in seen_names or "test_" in norm_key or file_size < 5 * 1024 * 1024:
+            continue
+        seen_names.add(norm_key)
+
+        meta = None
+        for k, v in KNOWN_MOVIES_METADATA.items():
+            if k in norm_key:
+                meta = v
+                break
+
+        if not meta:
+            clean_title = file_name.rsplit(".", 1)[0].replace("_", " ").replace(".", " ").title()
+            meta = {
+                "title": clean_title,
+                "original_title": file_name,
+                "overview": "ภาพยนตร์คุณภาพสูงจาก Telegram Cloud Storage พร้อมระบบสตรีมมิ่งความเร็วสูง",
+                "poster_url": "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60",
+                "backdrop_url": "https://images.unsplash.com/photo-1518173946687-a4c8a383392e?w=1280&auto=format&fit=crop&q=80",
+                "release_date": "2024",
+                "vote_average": 7.5,
+                "category": "ภาพยนตร์"
+            }
+
+        is_faststart = get_faststart_path(chat_id, msg_id) is not None
+
+        movies.append({
+            "id": f"{chat_id}_{msg_id}",
+            "chat_id": chat_id,
+            "msg_id": msg_id,
+            "file_name": file_name,
+            "title": meta["title"],
+            "original_title": meta["original_title"],
+            "overview": meta["overview"],
+            "poster_url": meta["poster_url"],
+            "backdrop_url": meta["backdrop_url"],
+            "release_date": meta["release_date"],
+            "vote_average": meta["vote_average"],
+            "category": meta["category"],
+            "duration": duration,
+            "duration_formatted": format_movie_duration(duration),
+            "file_size": file_size,
+            "size_formatted": format_movie_size(file_size),
+            "faststart_ready": is_faststart,
+            "watch_url": f"/watch/{chat_id}/{msg_id}",
+            "stream_url": f"/stream/{chat_id}/{msg_id}"
+        })
+
+    return movies
+
+async def handle_api_movies(request: web.Request):
+    movies = get_all_movies()
+    return web.json_response(movies, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=60"
+    })
+
+CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAPT-CINEMA — ศูนย์รวมภาพยนตร์ออนไลน์</title>
+  <link rel="icon" type="image/png" href="/cinema-icon.png?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090e;
+      --surface: rgba(15, 23, 42, 0.7);
+      --surface-border: rgba(255, 255, 255, 0.08);
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.35);
+      --accent: #818cf8;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', 'Noto Sans Thai', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(ellipse at 15% 0%, rgba(56, 189, 248, 0.12), transparent 50%),
+        radial-gradient(ellipse at 85% 15%, rgba(129, 140, 248, 0.08), transparent 50%);
+    }
+    /* Header */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(7, 9, 14, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+    }
+    .brand-icon {
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.5));
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .brand:hover .brand-icon {
+      transform: scale(1.12) rotate(-4deg);
+    }
+    .brand-icon img {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+      display: block;
+    }
+    .brand-name {
+      font-size: 1.35rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      background: linear-gradient(135deg, #FFFDE0 0%, #FDE047 25%, #F59E0B 70%, #D97706 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.55));
+      text-transform: uppercase;
+      transition: filter 0.25s ease;
+    }
+    .brand:hover .brand-name {
+      filter: drop-shadow(0 0 24px rgba(250, 204, 21, 0.85));
+    }
+    .search-container {
+      flex: 1;
+      max-width: 480px;
+      position: relative;
+    }
+    .search-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--surface-border);
+      border-radius: 9999px;
+      padding: 10px 20px 10px 42px;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .search-input:focus {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--primary);
+      box-shadow: 0 0 16px var(--primary-glow);
+    }
+    .search-icon {
+      position: absolute;
+      left: 16px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .header-links {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn-drive {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--surface-border);
+      border-radius: 9999px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .btn-drive:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Featured Hero Section */
+    .hero-container {
+      position: relative;
+      width: 100%;
+      min-height: 480px;
+      display: flex;
+      align-items: flex-end;
+      padding: 40px 48px;
+      background-size: cover;
+      background-position: center 25%;
+      background-repeat: no-repeat;
+      overflow: hidden;
+    }
+    .hero-mask {
+      position: absolute;
+      inset: 0;
+      background: 
+        linear-gradient(to right, rgba(7, 9, 14, 0.95) 20%, rgba(7, 9, 14, 0.7) 60%, rgba(7, 9, 14, 0.3) 100%),
+        linear-gradient(to top, rgba(7, 9, 14, 1) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .hero-body {
+      position: relative;
+      z-index: 10;
+      max-width: 680px;
+    }
+    .hero-tags {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .tag {
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .tag-primary { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+    .tag-gold { background: rgba(234, 179, 8, 0.18); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
+    .tag-green { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .hero-title {
+      font-size: 2.75rem;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 14px;
+      text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8);
+    }
+    .hero-overview {
+      color: #cbd5e1;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-bottom: 24px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-play-hero {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #fff;
+      padding: 13px 28px;
+      border-radius: 9999px;
+      font-size: 1rem;
+      font-weight: 700;
+      text-decoration: none;
+      box-shadow: 0 4px 25px var(--primary-glow);
+      transition: all 0.25s ease;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-play-hero:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 8px 32px rgba(56, 189, 248, 0.5);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(8px);
+      color: #fff;
+      padding: 13px 22px;
+      border-radius: 9999px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    /* Main Content */
+    main {
+      padding: 36px 48px 60px;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .section-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .filter-tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--surface-border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active, .tab-btn:hover {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* Movies Grid */
+    .movies-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 24px;
+    }
+    .movie-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 16px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      text-decoration: none;
+      color: inherit;
+    }
+    .movie-card:hover, .movie-card:focus {
+      transform: translateY(-8px);
+      border-color: var(--primary);
+      box-shadow: 0 20px 35px -10px rgba(56, 189, 248, 0.25);
+      outline: none;
+    }
+    .poster-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      background: #111827;
+      overflow: hidden;
+    }
+    .poster-img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s ease;
+    }
+    .movie-card:hover .poster-img {
+      transform: scale(1.06);
+    }
+    .card-badge {
+      position: absolute;
+      top: 10px; left: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #facc15;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .faststart-pill {
+      position: absolute;
+      top: 10px; right: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(16, 185, 129, 0.85);
+      backdrop-filter: blur(6px);
+      font-size: 0.65rem;
+      font-weight: 800;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .play-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .movie-card:hover .play-overlay {
+      opacity: 1;
+    }
+    .play-btn-circle {
+      width: 54px; height: 54px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.95);
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.6);
+      display: flex; align-items: center; justify-content: center;
+      transform: scale(0.85);
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .movie-card:hover .play-btn-circle {
+      transform: scale(1);
+    }
+    .play-btn-circle svg {
+      width: 24px; height: 24px;
+      fill: #fff;
+      margin-left: 3px;
+    }
+    .card-meta {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card-sub {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-top: auto;
+    }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: rgba(16, 185, 129, 0.95);
+      backdrop-filter: blur(8px);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 999;
+    }
+    #toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      header { padding: 12px 16px; flex-wrap: wrap; }
+      .search-container { order: 3; max-width: 100%; width: 100%; margin-top: 8px; }
+      .hero-container { padding: 24px 20px; min-height: 380px; }
+      .hero-title { font-size: 1.85rem; }
+      main { padding: 24px 16px 40px; }
+      .movies-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header Bar -->
+  <header>
+    <a href="/" class="brand">
+      <div class="brand-icon">
+        <img src="/cinema-icon.png?v=2" alt="GAPT-CINEMA">
+      </div>
+      <div class="brand-name">GAPT-CINEMA</div>
+    </a>
+    <div class="search-container">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาชื่อภาพยนตร์, ซีรีส์..." autocomplete="off">
+    </div>
+  </header>
+
+  <!-- Featured Hero Banner (Dynamic) -->
+  <div class="hero-container" id="heroBanner" style="background-image: url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1920&auto=format&fit=crop');">
+    <div class="hero-mask"></div>
+    <div class="hero-body">
+      <div class="hero-tags">
+        <span class="tag tag-primary">★ 8.5/10 TMDB</span>
+        <span class="tag tag-gold">2024</span>
+        <span class="tag tag-green">⚡ Faststart พร้อมดู</span>
+        <span class="tag" style="background: rgba(255,255,255,0.1); color: #fff;">1080p Full HD</span>
+      </div>
+      <h1 class="hero-title" id="heroTitle">ธี่หยด 2 (สมิงเขาขวาง)</h1>
+      <p class="hero-overview" id="heroOverview">
+        3 ปีหลังจากการเสียชีวิตของแย้ม 'ยักษ์' ยังคงออกตามล่าวิญญาณชุดดำอย่างไม่ลดละ จนกระทั่งพบเบาะแสว่ามีผีชุดดำสิงสู่ในดงโขมดป่าลึก ยักษ์จึงต้องร่วมมือกับจ่าปันเพื่อปิดบัญชีแค้นก่อนที่ความตายจะพรากคนที่เขารักไปอีกครั้ง
+      </p>
+      <div class="hero-actions">
+        <a id="heroPlayBtn" href="/watch/4381915212/2" class="btn-play-hero">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          เริ่มเล่นภาพยนตร์
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Catalog Section -->
+  <main>
+    <div class="section-head">
+      <h2 class="section-title">
+        <span>🍿</span> ภาพยนตร์และวิดีโอทั้งหมด <span id="movieCount" style="color: var(--primary); font-size: 1rem; font-weight: 500;"></span>
+      </h2>
+      <div class="filter-tabs">
+        <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
+        <button class="tab-btn" onclick="filterCategory('thai', this)">ภาพยนตร์ไทย</button>
+      </div>
+    </div>
+
+    <!-- Movie Cards Grid -->
+    <div class="movies-grid" id="moviesGrid">
+      <!-- Dynamic render via JS -->
+    </div>
+  </main>
+
+  <div id="toast">คัดลอกลิงก์สตรีมสำเร็จ!</div>
+
+  <script>
+    var allMovies = __INITIAL_MOVIES_JSON__;
+    var currentFilter = 'all';
+
+    function renderMovies(movies) {
+      var grid = document.getElementById('moviesGrid');
+      document.getElementById('movieCount').innerText = '(' + movies.length + ' เรื่อง)';
+      
+      if (movies.length === 0) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 60px 0; color: #64748b;">ไม่พบภาพยนตร์ที่ค้นหา</div>';
+        return;
+      }
+
+      var html = '';
+      movies.forEach(function(m) {
+        var faststartBadge = m.faststart_ready ? '<span class="faststart-pill">⚡ Faststart</span>' : '';
+        var dur = m.duration_formatted ? m.duration_formatted : (m.size_formatted || '');
+        var rating = m.vote_average ? ('⭐ ' + m.vote_average.toFixed(1)) : 'HD';
+
+        html += `
+          <a href="${m.watch_url}" class="movie-card" tabindex="0">
+            <div class="poster-wrap">
+              <img src="${m.poster_url}" alt="${m.title}" class="poster-img" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60'">
+              <span class="card-badge">${rating}</span>
+              ${faststartBadge}
+              <div class="play-overlay">
+                <div class="play-btn-circle">
+                  <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="card-meta">
+              <h3 class="card-title">${m.title}</h3>
+              <div class="card-sub">
+                <span>${m.release_date || '2024'}</span>
+                <span>${dur}</span>
+              </div>
+            </div>
+          </a>
+        `;
+      });
+      grid.innerHTML = html;
+    }
+
+    function applyFilter() {
+      var q = document.getElementById('searchInput').value.toLowerCase().trim();
+      var filtered = allMovies.filter(function(m) {
+        var matchQ = !q || m.title.toLowerCase().indexOf(q) !== -1 || m.original_title.toLowerCase().indexOf(q) !== -1;
+        var matchCat = true;
+        if (currentFilter === 'faststart') {
+          matchCat = m.faststart_ready;
+        } else if (currentFilter === 'thai') {
+          matchCat = m.category === 'ภาพยนตร์ไทย';
+        }
+        return matchQ && matchCat;
+      });
+      renderMovies(filtered);
+    }
+
+    function filterCategory(cat, btn) {
+      currentFilter = cat;
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      if (btn) btn.classList.add('active');
+      applyFilter();
+    }
+
+    function copyStream(url) {
+      var fullUrl = window.location.origin + url;
+      navigator.clipboard.writeText(fullUrl).then(function() {
+        var t = document.getElementById('toast');
+        t.innerText = 'คัดลอกลิงก์สตรีมสำเร็จ! นำไปเปิดใน VLC หรือ Player ได้ทันที';
+        t.className = 'show';
+        setTimeout(function() { t.className = ''; }, 3000);
+      });
+    }
+
+    document.getElementById('searchInput').addEventListener('input', applyFilter);
+
+    // Initial render
+    renderMovies(allMovies);
+  </script>
+</body>
+</html>'''
+
+async def handle_cinema_portal(request: web.Request):
+    movies = get_all_movies()
+    movies_json = json.dumps(movies, ensure_ascii=False)
+    html_content = CINEMA_PORTAL_HTML.replace("__INITIAL_MOVIES_JSON__", movies_json)
+    return web.Response(
+        text=html_content,
+        content_type="text/html",
+        charset="utf-8",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=10"
+        }
+    )
+
 # ─── HTTP ENDPOINTS ────────────────────────────────────────────────────────────
 
 async def handle_index(request: web.Request):
     return web.json_response({
-        "service": "Antigravity Ultra Video Stream Engine",
+        "service": "GAPT-CINEMA Video Stream Engine",
         "version": "2.0.0",
         "status": "online",
         "features": [
@@ -443,6 +1179,8 @@ async def handle_index(request: web.Request):
             "Cloudflare CDN & HTTP/3 QUIC"
         ],
         "endpoints": {
+            "cinema_dashboard": "/",
+            "movies_api": "/api/movies",
             "watch": "/watch/{chat_id}/{msg_id}",
             "hls_master": "/hls/{chat_id}/{msg_id}/master.m3u8",
             "hls_playlist": "/hls/{chat_id}/{msg_id}/{quality}/index.m3u8",
@@ -454,7 +1192,16 @@ async def handle_index(request: web.Request):
         }
     })
 
+
+async def handle_cinema_icon(request: web.Request):
+    if CINEMA_ICON_PATH.exists():
+        return web.FileResponse(CINEMA_ICON_PATH, headers={"Cache-Control": "public, max-age=86400"})
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#38bdf8"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
+    return web.Response(text=svg, content_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
 async def handle_favicon(request: web.Request):
+    if CINEMA_ICON_PATH.exists():
+        return web.FileResponse(CINEMA_ICON_PATH, headers={"Cache-Control": "public, max-age=86400"})
     svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#38bdf8"><polygon points="5 3 19 12 5 21 5 3"/></svg>'
     return web.Response(text=svg, content_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
@@ -475,6 +1222,21 @@ async def handle_stream(request: web.Request):
     file_size = file_info["size"]
     mime_type = file_info["mime"]
     file_name = file_info["name"]
+
+    # If pre-remuxed True Faststart exists on local SSD, serve it with 0 latency & full Range support!
+    faststart_path = get_faststart_path(chat_id, msg_id)
+    if faststart_path:
+        response = web.FileResponse(faststart_path)
+        response.headers["Accept-Ranges"] = "bytes"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Range"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Range, Content-Length, Accept-Ranges"
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers["Alt-Svc"] = 'h3=":443"; ma=86400'
+        if is_download:
+            safe_name = file_name.replace('"', '\\"')
+            response.headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
+        return response
 
     range_header = request.headers.get("Range")
     start = 0
@@ -663,7 +1425,75 @@ async def handle_hls_media_playlist(request: web.Request):
         }
     )
 
-# ─── HLS SEGMENT SERVER WITH SSD CACHE ────────────────────────────────────────
+# ─── HLS SEGMENT SERVER WITH CONTINUOUS GENERATOR ─────────────────────────────
+
+# One long-running FFmpeg per video: reads stream linearly, outputs all segments
+continuous_generators = {}  # key -> {"proc": Process, "task": Task}
+continuous_gen_lock = asyncio.Lock()
+
+async def ensure_continuous_generator(chat_id: int, msg_id: int, quality: str = "source"):
+    """Start a continuous FFmpeg HLS segmenter if not already running.
+    FFmpeg reads the stream ONCE (linearly, no seeking) and outputs segments
+    continuously to disk — much faster than per-segment seek approach."""
+    key = f"{chat_id}_{msg_id}_{quality}"
+
+    async with continuous_gen_lock:
+        # Already running?
+        if key in continuous_generators:
+            gen = continuous_generators[key]
+            if gen["proc"].returncode is None:  # still running
+                return
+            # Process finished, remove stale entry
+            continuous_generators.pop(key, None)
+
+        stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
+
+        # Build segment filename pattern to match cache_key format
+        seg_pattern = str(CACHE_DIR / f"{chat_id}_{msg_id}_{quality}_%d.ts")
+
+        vf = []
+        codec_args = ["-c", "copy", "-bsf:v", "h264_mp4toannexb"]
+        if quality == "480p":
+            codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-vf", "scale=-2:480", "-c:a", "aac", "-b:a", "96k"]
+        elif quality == "720p":
+            codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-vf", "scale=-2:720", "-c:a", "aac", "-b:a", "128k"]
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", stream_url,
+            *codec_args,
+            "-f", "hls",
+            "-hls_time", str(int(SEGMENT_DURATION)),
+            "-hls_playlist_type", "vod",
+            "-hls_flags", "independent_segments",
+            "-hls_segment_filename", seg_pattern,
+            str(CACHE_DIR / f"{key}_playlist.m3u8")  # temp playlist (not served)
+        ]
+
+        logger.info(f"Starting continuous segment generator for {key}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        async def monitor():
+            try:
+                _, stderr = await proc.communicate()
+                rc = proc.returncode
+                if rc != 0:
+                    err_tail = (stderr or b"")[-500:].decode("utf-8", errors="replace")
+                    logger.warning(f"Continuous generator {key} exited code {rc}: {err_tail}")
+                else:
+                    logger.info(f"Continuous generator {key} completed successfully")
+            except Exception as e:
+                logger.error(f"Continuous generator monitor error {key}: {e}")
+            finally:
+                async with continuous_gen_lock:
+                    continuous_generators.pop(key, None)
+
+        task = asyncio.create_task(monitor())
+        continuous_generators[key] = {"proc": proc, "task": task}
 
 async def handle_hls_segment(request: web.Request):
     try:
@@ -678,120 +1508,30 @@ async def handle_hls_segment(request: web.Request):
     cache_key = f"{chat_id}_{msg_id}_{quality}_{seg_idx}.ts"
     cached_file = CACHE_DIR / cache_key
 
-    # Check disk cache
+    # Check disk cache — instant serve if already generated
     if cached_file.exists() and cached_file.stat().st_size > 0:
         record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
         return await serve_file_segment(request, cached_file)
 
-    # Concurrency lock per segment to avoid duplicate FFmpeg runs
-    async with segment_locks_guard:
-        if cache_key not in segment_locks:
-            segment_locks[cache_key] = asyncio.Lock()
-        lock = segment_locks[cache_key]
+    # Ensure continuous generator is running for this video
+    await ensure_continuous_generator(chat_id, msg_id, quality)
 
-    async with lock:
-        # Check again after acquiring lock
+    # Wait for the segment file to appear (generated by background FFmpeg)
+    max_wait = 45.0  # seconds
+    poll_interval = 0.5
+    waited = 0.0
+    while waited < max_wait:
         if cached_file.exists() and cached_file.stat().st_size > 0:
-            record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
-            return await serve_file_segment(request, cached_file)
-
-        async with FFMPEG_SEMAPHORE:
-            # Check once more after acquiring global FFmpeg semaphore
+            # Small extra wait to ensure FFmpeg has finished writing
+            await asyncio.sleep(0.2)
             if cached_file.exists() and cached_file.stat().st_size > 0:
                 record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
                 return await serve_file_segment(request, cached_file)
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
 
-            # Generate segment with FFmpeg from local stream
-            info = await get_or_probe_file_info(chat_id, msg_id)
-            if not info:
-                return web.Response(text="Source video not found", status=404)
-
-            start_time = seg_idx * SEGMENT_DURATION
-            duration = SEGMENT_DURATION
-            temp_file = CACHE_DIR / f"temp_{cache_key}"
-
-            stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
-
-            # Strategy 1: Fast stream copy (ultra fast < 50ms, direct H.264 slice)
-            success = False
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", f"{start_time:.3f}",
-                "-i", stream_url,
-                "-t", f"{duration:.3f}",
-                "-c", "copy",
-                "-bsf:v", "h264_mp4toannexb",
-                "-f", "mpegts",
-                str(temp_file)
-            ]
-            proc = None
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
-                await asyncio.wait_for(proc.communicate(), timeout=20.0)
-                if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
-                    success = True
-            except asyncio.TimeoutError:
-                logger.warning(f"Stream copy timed out for segment {cache_key}")
-                if proc:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Stream copy failed for segment {cache_key}: {e}")
-
-            # Strategy 2: Fast re-encode if stream copy fails
-            if not success:
-                vf = []
-                if quality == "480p":
-                    vf = ["-vf", "scale=-2:480"]
-                elif quality == "720p":
-                    vf = ["-vf", "scale=-2:720"]
-                elif quality == "1080p":
-                    vf = ["-vf", "scale=-2:1080"]
-
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", f"{start_time:.3f}",
-                    "-i", stream_url,
-                    "-t", f"{duration:.3f}",
-                    *vf,
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "aac", "-b:a", "128k",
-                    "-f", "mpegts",
-                    str(temp_file)
-                ]
-                proc = None
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                    )
-                    await asyncio.wait_for(proc.communicate(), timeout=25.0)
-                    if proc.returncode == 0 and temp_file.exists() and temp_file.stat().st_size > 0:
-                        success = True
-                except asyncio.TimeoutError:
-                    logger.warning(f"Re-encode timed out for segment {cache_key}")
-                    if proc:
-                        try:
-                            proc.kill()
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.error(f"Re-encode failed for segment {cache_key}: {e}")
-
-        if success and temp_file.exists():
-            temp_file.replace(cached_file)
-            record_cache_access(cache_key, str(cached_file), cached_file.stat().st_size)
-            return await serve_file_segment(request, cached_file)
-        else:
-            if temp_file.exists():
-                try:
-                    temp_file.unlink()
-                except Exception:
-                    pass
-            return web.Response(text="Failed to produce segment", status=500)
+    logger.warning(f"Segment {cache_key} not ready after {max_wait}s wait")
+    return web.Response(text="Segment generation timeout", status=504)
 
 async def serve_file_segment(request: web.Request, file_path: Path):
     stat = file_path.stat()
@@ -1107,131 +1847,290 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       outline: none;
     }
 
-    /* Floating Glassmorphism Quality Badge */
-    .quality-wrap {
+    /* Hide Chromium native overflow button */
+    video::-webkit-media-controls-overflow-button,
+    video::-webkit-media-controls-overflow-menu-list,
+    video::-internal-media-controls-overflow-button {
+      display: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    /* Top-Right Settings / Action Wrap (YouTube / Netflix Style) */
+    .custom-more-wrap {
       position: absolute;
-      top: 1.25rem;
-      right: 1.25rem;
+      top: 16px;
+      right: 16px;
+      width: 40px;
+      height: 40px;
       z-index: 2147483647;
-      user-select: none;
-      transition: opacity 0.35s ease, transform 0.25s ease;
-      opacity: 0.95;
-      display: block !important;
-    }
-    /* When idle, stay subtly visible at 45% opacity (NEVER vanish completely) */
-    .quality-wrap.fade-out {
-      opacity: 0.45;
-    }
-    .quality-wrap:hover,
-    .quality-wrap:focus-within,
-    .quality-wrap.active-menu {
-      opacity: 1 !important;
-      transform: scale(1.02);
-    }
-    .quality-btn {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 0.55rem;
-      background: rgba(15, 23, 42, 0.82);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      color: #f8fafc;
-      padding: 0.5rem 1rem;
-      border-radius: 9999px;
-      font-size: 0.85rem;
-      font-weight: 600;
+      justify-content: center;
+      user-select: none;
+      transition: opacity 0.35s ease, transform 0.2s ease;
+    }
+    .custom-more-wrap.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .custom-more-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(18, 22, 30, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65), 0 0 12px rgba(56, 189, 248, 0.25);
-      transition: all 0.2s ease;
       outline: none;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
     }
-    .quality-btn:hover {
-      background: rgba(30, 41, 59, 0.95);
-      border-color: rgba(56, 189, 248, 0.8);
-      box-shadow: 0 6px 25px rgba(56, 189, 248, 0.4);
-    }
-    .quality-btn svg {
+    .custom-more-btn:hover, .custom-more-wrap.active-menu .custom-more-btn {
+      background: rgba(56, 189, 248, 0.25);
+      border-color: #38bdf8;
       color: #38bdf8;
-      transition: transform 0.3s ease;
+      transform: scale(1.08) rotate(30deg);
     }
-    .quality-wrap.active-menu .quality-btn svg {
-      transform: rotate(60deg);
+    .custom-more-btn svg {
+      width: 20px;
+      height: 20px;
     }
-    .quality-menu {
+
+    /* Popup Menus */
+    .more-menu {
       display: none;
       position: absolute;
-      top: calc(100% + 0.65rem);
+      top: calc(100% + 10px);
       right: 0;
-      background: rgba(15, 23, 42, 0.95);
+      bottom: auto;
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
+      background: rgba(22, 27, 38, 0.96);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
-      border: 1px solid rgba(255, 255, 255, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: 14px;
-      padding: 0.45rem;
-      min-width: 185px;
-      box-shadow: 0 15px 45px rgba(0, 0, 0, 0.85), 0 0 20px rgba(56, 189, 248, 0.15);
+      padding: 6px;
+      min-width: 235px;
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.85);
       flex-direction: column;
-      gap: 0.3rem;
+      gap: 2px;
       z-index: 2147483647;
     }
-    .quality-menu.show {
+    .more-menu.show {
       display: flex;
-      animation: menuPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: menuPopDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    @keyframes menuPop {
+    @keyframes menuPopDown {
       from { opacity: 0; transform: translateY(-8px) scale(0.96); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    .quality-item {
+    .menu-item {
       display: flex;
       align-items: center;
-      gap: 0.65rem;
-      padding: 0.55rem 0.85rem;
+      justify-content: space-between;
+      padding: 10px 12px;
       border-radius: 9px;
-      font-size: 0.82rem;
+      color: #f1f5f9;
+      font-size: 0.88rem;
       font-weight: 500;
-      color: #cbd5e1;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background 0.15s, color 0.15s;
     }
-    .quality-item:hover {
+    .menu-item:hover {
       background: rgba(255, 255, 255, 0.12);
-      color: #ffffff;
-      transform: translateX(2px);
+      color: #fff;
     }
-    .quality-item.active {
+    .menu-item-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .item-icon {
+      width: 18px;
+      height: 18px;
+      color: #94a3b8;
+      flex-shrink: 0;
+    }
+    .menu-item:hover .item-icon {
+      color: #38bdf8;
+    }
+    .menu-item-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #94a3b8;
+      font-size: 0.82rem;
+    }
+    .arrow { font-size: 1.15rem; line-height: 1; color: #64748b; }
+    .badge-value { color: #38bdf8; font-weight: 700; }
+    .menu-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.08);
+      margin: 4px 6px;
+    }
+    .submenu-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      color: #94a3b8;
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .submenu-header:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .back-arrow { font-size: 1.3rem; line-height: 1; }
+    .sub-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      color: #cbd5e1;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .sub-item:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .sub-item.active {
       color: #38bdf8;
       font-weight: 700;
-      background: rgba(56, 189, 248, 0.18);
+      background: rgba(56, 189, 248, 0.15);
     }
-    .check-icon {
+    .check-mark {
       width: 14px;
+      font-size: 0.9rem;
       font-weight: bold;
       visibility: hidden;
     }
-    .quality-item.active .check-icon {
+    .sub-item.active .check-mark {
       visibility: visible;
     }
-
   </style>
 </head>
 <body>
   <div id="player-container">
-    <video id="video-player" src="__STREAM_URL__" playsinline controls autoplay preload="auto"></video>
+    <video id="video-player" src="__STREAM_URL__" playsinline controls controlslist="nodownload noplaybackrate noremoteplayback" disablepictureinpicture autoplay preload="auto"></video>
 
-    <!-- Floating Quality Control Badge (Top-Right) -->
-    <div class="quality-wrap" id="quality-wrap">
-      <button class="quality-btn" id="quality-btn" type="button" title="คลิกเพื่อปรับความละเอียด">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top-Right Settings & Options Wrap (YouTube / Netflix Style) -->
+    <div class="custom-more-wrap" id="custom-more-wrap">
+      <button class="custom-more-btn" id="custom-more-btn" type="button" title="การตั้งค่าและตัวเลือกเพิ่มเติม">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
-        <span id="quality-label">Auto</span>
       </button>
 
-      <div class="quality-menu" id="quality-menu">
-        <!-- Rendered dynamically -->
+      <!-- Main More Menu -->
+      <div class="more-menu" id="more-menu">
+        <!-- 1. Quality (First Item) -->
+        <div class="menu-item" id="btn-open-quality">
+          <div class="menu-item-left">
+            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+            <span>ความละเอียด</span>
+          </div>
+          <div class="menu-item-right">
+            <span class="badge-value" id="current-quality-val">AUTO</span>
+            <span class="arrow">›</span>
+          </div>
+        </div>
+
+        <div class="menu-divider"></div>
+
+        <!-- 2. Playback Speed -->
+        <div class="menu-item" id="btn-open-speed">
+          <div class="menu-item-left">
+            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>ความเร็วในการเล่น</span>
+          </div>
+          <div class="menu-item-right">
+            <span class="badge-value" id="current-speed-val">ปกติ</span>
+            <span class="arrow">›</span>
+          </div>
+        </div>
+
+        <!-- 3. Picture in Picture -->
+        <div class="menu-item" id="btn-pip">
+          <div class="menu-item-left">
+            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <rect x="12" y="11" width="8" height="7" rx="1"></rect>
+            </svg>
+            <span>การแสดงภาพซ้อนภาพ</span>
+          </div>
+        </div>
+
+        <!-- 4. Direct Download -->
+        <div class="menu-item" id="btn-download">
+          <div class="menu-item-left">
+            <svg class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>ดาวน์โหลด</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submenu: Quality Selection -->
+      <div class="more-menu submenu" id="submenu-quality">
+        <div class="submenu-header" id="btn-back-quality">
+          <span class="back-arrow">‹</span>
+          <span>ความละเอียด</span>
+        </div>
+        <div class="menu-divider"></div>
+        <div class="sub-item active" data-q="auto" data-label="AUTO">
+          <span class="check-mark">✓</span><span>AUTO</span>
+        </div>
+        <div class="sub-item" data-q="direct" data-label="UHD">
+          <span class="check-mark">✓</span><span>UHD</span>
+        </div>
+        <div class="sub-item" data-q="hls_1080" data-label="FHD">
+          <span class="check-mark">✓</span><span>FHD</span>
+        </div>
+        <div class="sub-item" data-q="hls_720" data-label="HD">
+          <span class="check-mark">✓</span><span>HD</span>
+        </div>
+        <div class="sub-item" data-q="hls_480" data-label="SD">
+          <span class="check-mark">✓</span><span>SD</span>
+        </div>
+      </div>
+
+      <!-- Submenu: Speed Selection -->
+      <div class="more-menu submenu" id="submenu-speed">
+        <div class="submenu-header" id="btn-back-speed">
+          <span class="back-arrow">‹</span>
+          <span>ความเร็วในการเล่น</span>
+        </div>
+        <div class="menu-divider"></div>
+        <div class="sub-item" data-speed="0.5" data-slabel="0.5x"><span class="check-mark">✓</span><span>0.5x</span></div>
+        <div class="sub-item" data-speed="0.75" data-slabel="0.75x"><span class="check-mark">✓</span><span>0.75x</span></div>
+        <div class="sub-item active" data-speed="1" data-slabel="ปกติ"><span class="check-mark">✓</span><span>ปกติ</span></div>
+        <div class="sub-item" data-speed="1.25" data-slabel="1.25x"><span class="check-mark">✓</span><span>1.25x</span></div>
+        <div class="sub-item" data-speed="1.5" data-slabel="1.5x"><span class="check-mark">✓</span><span>1.5x</span></div>
+        <div class="sub-item" data-speed="2" data-slabel="2x"><span class="check-mark">✓</span><span>2x</span></div>
       </div>
     </div>
   </div>
@@ -1239,27 +2138,24 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
   <script>
     const hlsUrl = "__HLS_URL__";
     const streamFallbackUrl = "__STREAM_URL__";
+    const dlUrl = "/dl/__CHAT_ID__/__MSG_ID__";
     const video = document.getElementById('video-player');
     const container = document.getElementById('player-container');
-    const qualityWrap = document.getElementById('quality-wrap');
-    const qualityBtn = document.getElementById('quality-btn');
-    const qualityMenu = document.getElementById('quality-menu');
-    const qualityLabel = document.getElementById('quality-label');
+    const moreWrap = document.getElementById('custom-more-wrap');
+    const moreBtn = document.getElementById('custom-more-btn');
+    const moreMenu = document.getElementById('more-menu');
+    const submenuQuality = document.getElementById('submenu-quality');
+    const submenuSpeed = document.getElementById('submenu-speed');
+    const curQualityVal = document.getElementById('current-quality-val');
+    const curSpeedVal = document.getElementById('current-speed-val');
 
     let hlsInstance = null;
 
-    // Service Worker Registration for Predictive Prefetch
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
-        .then(() => console.log('Predictive prefetch Service Worker active'))
-        .catch(() => {});
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     }
 
-    // Populate initial menu immediately on millisecond 0
-    setupQualityMenuOptions('direct');
-
     function initPlayer() {
-      // Ensure quality badge stays visible in native Fullscreen mode
       const origRequestFullscreen = video.requestFullscreen || video.webkitRequestFullscreen;
       video.requestFullscreen = function() {
         if (container.requestFullscreen) return container.requestFullscreen();
@@ -1267,9 +2163,6 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
         if (origRequestFullscreen) return origRequestFullscreen.call(video);
       };
       if (video.webkitRequestFullscreen) video.webkitRequestFullscreen = video.requestFullscreen;
-
-      // Smart TV / Native Direct Stream Priority
-      // Direct stream plays original H.264/AAC with native hardware acceleration, zero CPU lag and smooth continuous buffering.
       playDirect();
     }
 
@@ -1279,14 +2172,11 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
         hlsInstance = null;
       }
       video.src = streamFallbackUrl;
-      setupQualityMenuOptions('direct');
       video.load();
-      video.play().catch((err) => {
-        console.log('Autoplay deferred, waiting for user click:', err);
-      });
+      video.play().catch(() => {});
     }
 
-    function playHls(targetUrl, levelLabel) {
+    function playHls(targetUrl) {
       if (window.Hls && Hls.isSupported()) {
         if (hlsInstance) {
           try { hlsInstance.destroy(); } catch (e) {}
@@ -1301,19 +2191,16 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
         hlsInstance = hls;
         hls.loadSource(targetUrl || hlsUrl);
         hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
-          setupQualityMenuOptions('hls', levelLabel);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (e, data) => {
-          console.warn('HLS Error event:', data.type, data.details, 'fatal:', data.fatal);
           if (data.fatal) {
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               hls.startLoad();
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               hls.recoverMediaError();
             } else {
-              console.warn('HLS unrecoverable, falling back to Direct Stream');
               playDirect();
             }
           }
@@ -1323,89 +2210,131 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       }
     }
 
-    function setupQualityMenuOptions(currentMode, activeLabel) {
-      qualityMenu.innerHTML = '';
-      const items = [
-        { id: 'direct', label: '1080p (Direct)', name: '⚡ 1080p Original (เร็วที่สุด ไร้กระตุก)' },
-        { id: 'hls_1080', label: '1080p (HLS)', name: '1080p Full HD (HLS)' },
-        { id: 'hls_720', label: '720p (HD)', name: '720p HD (ประหยัดเน็ต)' },
-        { id: 'hls_480', label: '480p (SD)', name: '480p SD (เน็ตช้า)' }
-      ];
-
-      items.forEach((it) => {
-        const item = document.createElement('div');
-        const isActive = (currentMode === 'direct' && it.id === 'direct') ||
-                         (currentMode === 'hls' && it.label === activeLabel);
-        item.className = 'quality-item' + (isActive ? ' active' : '');
-        item.innerHTML = `<span class="check-icon">✓</span><span>${it.name}</span>`;
-        item.onclick = () => {
-          qualityLabel.innerText = it.label.split(' ')[0];
-          closeQualityMenu();
-          const t = video.currentTime;
-          if (it.id === 'direct') {
-            playDirect();
-          } else if (it.id === 'hls_720') {
-            playHls('/hls/__CHAT_ID__/__MSG_ID__/720p/index.m3u8', it.label);
-          } else if (it.id === 'hls_480') {
-            playHls('/hls/__CHAT_ID__/__MSG_ID__/480p/index.m3u8', it.label);
-          } else {
-            playHls(hlsUrl, it.label);
-          }
-          if (t > 0) {
-            video.currentTime = t;
-          }
-        };
-        qualityMenu.appendChild(item);
-      });
-
-      if (currentMode === 'direct') {
-        qualityLabel.innerText = '1080p';
-      }
+    function closeAllMenus() {
+      moreMenu.classList.remove('show');
+      submenuQuality.classList.remove('show');
+      submenuSpeed.classList.remove('show');
+      moreWrap.classList.remove('active-menu');
     }
 
-    function openQualityMenu() {
-      qualityMenu.classList.add('show');
-      qualityWrap.classList.add('active-menu');
-      qualityWrap.classList.remove('fade-out');
+    function isAnyMenuOpen() {
+      return moreMenu.classList.contains('show') || 
+             submenuQuality.classList.contains('show') || 
+             submenuSpeed.classList.contains('show');
     }
 
-    function closeQualityMenu() {
-      qualityMenu.classList.remove('show');
-      qualityWrap.classList.remove('active-menu');
-    }
-
-    qualityBtn.addEventListener('click', (e) => {
+    moreBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (qualityMenu.classList.contains('show')) {
-        closeQualityMenu();
+      if (isAnyMenuOpen()) {
+        closeAllMenus();
       } else {
-        openQualityMenu();
+        moreMenu.classList.add('show');
+        moreWrap.classList.add('active-menu');
+        moreWrap.classList.remove('fade-out');
       }
+    });
+
+    document.getElementById('btn-open-quality').addEventListener('click', (e) => {
+      e.stopPropagation();
+      moreMenu.classList.remove('show');
+      submenuQuality.classList.add('show');
+    });
+
+    document.getElementById('btn-back-quality').addEventListener('click', (e) => {
+      e.stopPropagation();
+      submenuQuality.classList.remove('show');
+      moreMenu.classList.add('show');
+    });
+
+    document.querySelectorAll('#submenu-quality .sub-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mode = item.getAttribute('data-q');
+        const label = item.getAttribute('data-label');
+        curQualityVal.innerText = label;
+
+        document.querySelectorAll('#submenu-quality .sub-item').forEach((i) => i.classList.remove('active'));
+        item.classList.add('active');
+
+        const t = video.currentTime;
+        if (mode === 'auto' || mode === 'direct') {
+          playDirect();
+        } else if (mode === 'hls_720') {
+          playHls('/hls/__CHAT_ID__/__MSG_ID__/720p/index.m3u8');
+        } else if (mode === 'hls_480') {
+          playHls('/hls/__CHAT_ID__/__MSG_ID__/480p/index.m3u8');
+        } else {
+          playHls(hlsUrl);
+        }
+        if (t > 0) video.currentTime = t;
+        closeAllMenus();
+      });
+    });
+
+    document.getElementById('btn-open-speed').addEventListener('click', (e) => {
+      e.stopPropagation();
+      moreMenu.classList.remove('show');
+      submenuSpeed.classList.add('show');
+    });
+
+    document.getElementById('btn-back-speed').addEventListener('click', (e) => {
+      e.stopPropagation();
+      submenuSpeed.classList.remove('show');
+      moreMenu.classList.add('show');
+    });
+
+    document.querySelectorAll('#submenu-speed .sub-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sp = parseFloat(item.getAttribute('data-speed'));
+        const slabel = item.getAttribute('data-slabel');
+        video.playbackRate = sp;
+        curSpeedVal.innerText = slabel;
+
+        document.querySelectorAll('#submenu-speed .sub-item').forEach((i) => i.classList.remove('active'));
+        item.classList.add('active');
+        closeAllMenus();
+      });
+    });
+
+    document.getElementById('btn-pip').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAllMenus();
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+      } else if (document.pictureInPictureEnabled && video) {
+        video.requestPictureInPicture().catch(() => {});
+      }
+    });
+
+    document.getElementById('btn-download').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAllMenus();
+      window.location.href = dlUrl;
     });
 
     document.addEventListener('click', (e) => {
-      if (!e.target.closest('#quality-wrap')) {
-        closeQualityMenu();
+      if (!e.target.closest('#custom-more-wrap')) {
+        closeAllMenus();
       }
     });
 
-    // Subtly dim button when inactive (never vanish completely)
     let idleTimer = null;
     function wakeControl() {
-      qualityWrap.classList.remove('fade-out');
+      moreWrap.classList.remove('fade-out');
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
-        if (!qualityMenu.classList.contains('show') && !video.paused) {
-          qualityWrap.classList.add('fade-out');
+        if (!isAnyMenuOpen() && !video.paused) {
+          moreWrap.classList.add('fade-out');
         }
-      }, 4000);
+      }, 3500);
     }
 
     document.addEventListener('mousemove', wakeControl);
     document.addEventListener('touchstart', wakeControl);
     video.addEventListener('play', wakeControl);
     video.addEventListener('pause', () => {
-      qualityWrap.classList.remove('fade-out');
+      moreWrap.classList.remove('fade-out');
       clearTimeout(idleTimer);
     });
     wakeControl();
@@ -1445,6 +2374,215 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
 </body>
 </html>'''
 
+def _is_smart_tv(request: web.Request) -> bool:
+    """Detect Smart TV browsers via User-Agent string."""
+    ua = (request.headers.get("User-Agent", "") or "").lower()
+    tv_keywords = [
+        "webos",        # LG webOS
+        "smarttv",      # Generic Smart TV
+        "smart-tv",
+        "tizen",        # Samsung Tizen
+        "netcast",      # LG NetCast (older)
+        "tv browser",
+        "viera",        # Panasonic
+        "bravia",       # Sony
+        "firetv",       # Amazon Fire TV
+        "roku",         # Roku
+        "crkey",        # Chromecast
+        "androidtv",    # Android TV
+        "hbbtv",        # Hybrid broadcast broadband TV
+        "lge",          # LG Electronics
+    ]
+    return any(kw in ua for kw in tv_keywords)
+
+# TV player: HLS via hls.js (each .ts segment = no moov issues).
+# Large play button for Magic Remote user-gesture trigger.
+TV_PLAYER_HTML = '''<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__FILE_NAME__</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+    video {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    #play-btn {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 9999;
+      border: none;
+      outline: none;
+      flex-direction: column;
+      gap: 24px;
+    }
+    #play-btn:focus { outline: 4px solid #38bdf8; }
+    #play-icon {
+      width: 140px; height: 140px;
+      background: rgba(56, 189, 248, 0.9);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 60px rgba(56, 189, 248, 0.5);
+    }
+    #play-icon svg { width: 60px; height: 60px; fill: #fff; margin-left: 8px; }
+    #play-btn:hover #play-icon,
+    #play-btn:focus #play-icon {
+      background: rgba(56, 189, 248, 1);
+      transform: scale(1.1);
+      box-shadow: 0 0 80px rgba(56, 189, 248, 0.8);
+    }
+    #play-text {
+      color: #94a3b8;
+      font-family: sans-serif;
+      font-size: 1.2rem;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <video id="v" controls preload="auto"></video>
+  <button id="play-btn" autofocus>
+    <div id="play-icon">
+      <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    </div>
+    <div id="play-text">กดเพื่อเล่นวิดีโอ</div>
+  </button>
+  <script>
+    var btn = document.getElementById('play-btn');
+    var vid = document.getElementById('v');
+    var hlsUrl = '__HLS_URL__';
+    var directUrl = '__STREAM_URL__';
+    var hasFaststart = __HAS_FASTSTART__;
+    var started = false;
+
+    function startPlay() {
+      if (started) return;
+      started = true;
+      btn.className = 'hidden';
+
+      // If Faststart is ready on local SSD, play direct MP4 for 100% native hardware acceleration!
+      if (hasFaststart) {
+        vid.src = directUrl;
+        vid.play();
+        return;
+      }
+
+      if (window.Hls && Hls.isSupported()) {
+        var hls = new Hls({
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          enableWorker: false,
+          lowLatencyMode: false
+        });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(vid);
+        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+          vid.play();
+        });
+        hls.on(Hls.Events.ERROR, function(e, data) {
+          if (data.fatal) {
+            vid.src = directUrl;
+            vid.play();
+          }
+        });
+      } else {
+        vid.src = directUrl;
+        vid.play();
+      }
+    }
+
+    btn.onclick = startPlay;
+    btn.addEventListener('keydown', function(e) {
+      if (e.keyCode === 13 || e.keyCode === 32) {
+        e.preventDefault();
+        startPlay();
+      }
+    });
+  </script>
+</body>
+</html>'''
+
+async def handle_tv_stream(request: web.Request):
+    """FFmpeg remux endpoint: moves moov atom to front for progressive TV playback."""
+    try:
+        chat_id = int(request.match_info["chat_id"])
+        msg_id = int(request.match_info["msg_id"])
+    except (ValueError, KeyError):
+        return web.Response(text="Invalid parameters", status=400)
+
+    stream_url = f"http://127.0.0.1:{PORT}/stream/{chat_id}/{msg_id}"
+
+    # FFmpeg remux: read from local stream, output faststart MP4 to stdout
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", stream_url,
+        "-c", "copy",                   # No re-encoding, just remux
+        "-movflags", "+faststart+frag_keyframe+empty_moov",
+        "-f", "mp4",
+        "pipe:1"
+    ]
+
+    logger.info(f"TV-Stream: Starting FFmpeg faststart remux for {chat_id}/{msg_id}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+    except Exception as e:
+        logger.error(f"TV-Stream: Failed to start FFmpeg: {e}")
+        return web.Response(text="Stream unavailable", status=500)
+
+    headers = {
+        "Content-Type": "video/mp4",
+        "Accept-Ranges": "none",
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+    }
+
+    response = web.StreamResponse(status=200, headers=headers)
+    await response.prepare(request)
+
+    try:
+        while True:
+            chunk = await proc.stdout.read(256 * 1024)  # 256KB chunks
+            if not chunk:
+                break
+            await response.write(chunk)
+    except (asyncio.CancelledError, ConnectionResetError):
+        proc.kill()
+    except Exception as e:
+        logger.warning(f"TV-Stream: Error during remux streaming: {e}")
+        proc.kill()
+    finally:
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+
+    await response.write_eof()
+    return response
+
 async def handle_watch(request: web.Request):
     try:
         chat_id = int(request.match_info["chat_id"])
@@ -1457,14 +2595,26 @@ async def handle_watch(request: web.Request):
         return web.Response(text=render_not_found_html(chat_id, msg_id), content_type="text/html", status=404)
 
     file_name = info["name"]
-    hls_master_url = f"/hls/{chat_id}/{msg_id}/master.m3u8"
     stream_url = f"/stream/{chat_id}/{msg_id}"
+    tv_stream_url = f"/tv-stream/{chat_id}/{msg_id}"
 
-    html_content = PURE_PLAYER_HTML.replace("__FILE_NAME__", html.escape(file_name)) \
-                                   .replace("__HLS_URL__", hls_master_url) \
-                                   .replace("__STREAM_URL__", stream_url) \
-                                   .replace("__CHAT_ID__", str(chat_id)) \
-                                   .replace("__MSG_ID__", str(msg_id))
+    # Smart TV → serve HLS player with hls.js (each .ts segment has no moov issues)
+    faststart_ready = get_faststart_path(chat_id, msg_id) is not None
+    if _is_smart_tv(request):
+        logger.info(f"Smart TV detected (UA: {request.headers.get('User-Agent', '')[:80]}), faststart={faststart_ready} for {chat_id}/{msg_id}")
+        hls_master_url = f"/hls/{chat_id}/{msg_id}/master.m3u8"
+        html_content = TV_PLAYER_HTML.replace("__FILE_NAME__", html.escape(file_name)) \
+                                     .replace("__HLS_URL__", hls_master_url) \
+                                     .replace("__STREAM_URL__", stream_url) \
+                                     .replace("__HAS_FASTSTART__", "true" if faststart_ready else "false")
+    else:
+        # Desktop/Mobile → full-featured player with HLS + quality switcher
+        hls_master_url = f"/hls/{chat_id}/{msg_id}/master.m3u8"
+        html_content = PURE_PLAYER_HTML.replace("__FILE_NAME__", html.escape(file_name)) \
+                                       .replace("__HLS_URL__", hls_master_url) \
+                                       .replace("__STREAM_URL__", stream_url) \
+                                       .replace("__CHAT_ID__", str(chat_id)) \
+                                       .replace("__MSG_ID__", str(msg_id))
 
     return web.Response(
         text=html_content,
@@ -1541,11 +2691,15 @@ def create_app():
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/favicon.ico", handle_favicon)
-    app.router.add_get("/", handle_index)
+    app.router.add_get("/cinema-icon.png", handle_cinema_icon)
+    app.router.add_get("/", handle_cinema_portal)
+    app.router.add_get("/cinema", handle_cinema_portal)
+    app.router.add_get("/api/movies", handle_api_movies)
     app.router.add_get("/health", handle_index)
     app.router.add_get("/sw.js", handle_service_worker)
     app.router.add_get("/watch/{chat_id}/{msg_id}", handle_watch)
     app.router.add_get("/stream/{chat_id}/{msg_id}", handle_stream)
+    app.router.add_get("/tv-stream/{chat_id}/{msg_id}", handle_tv_stream)
     app.router.add_get("/dl/{chat_id}/{msg_id}", handle_stream)
     app.router.add_get("/hls/{chat_id}/{msg_id}/master.m3u8", handle_hls_master)
     app.router.add_get("/hls/{chat_id}/{msg_id}/{quality}/index.m3u8", handle_hls_media_playlist)
