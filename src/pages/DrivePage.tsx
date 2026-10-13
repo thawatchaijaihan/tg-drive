@@ -1,64 +1,22 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Folder, FileText, Image, Video, Music, Archive,
+  Folder,
   Upload, FolderPlus, Download, Trash2, ChevronLeft,
-  RefreshCw, Loader2, Eye, LayoutGrid, List, Share2,
+  RefreshCw, Loader2, LayoutGrid, List, Share2,
   Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User,
-  PanelLeftClose, PanelLeftOpen, GripVertical, Play
+  PanelLeftClose, PanelLeftOpen, GripVertical
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatSidebar from "../components/ChatSidebar";
 import UploadModal from "../components/UploadModal";
 import NewFolderModal from "../components/NewFolderModal";
-import PreviewModal from "../components/PreviewModal";
 import ShareModal from "../components/ShareModal";
 import {
   getAllChats, getFiles, downloadFile, deleteFile,
-  deleteFolder, formatSize, getThumbnail
+  deleteFolder, formatSize
 } from "../lib/drive";
 import type { CachedFile, CachedFolder } from "../lib/db";
-
-function fileIcon(mime: string, size = 16) {
-  if (mime.startsWith("image/")) return <Image size={size} className="text-info" />;
-  if (mime.startsWith("video/")) return <Video size={size} className="text-secondary" />;
-  if (mime.startsWith("audio/")) return <Music size={size} className="text-accent" />;
-  if (mime.includes("zip") || mime.includes("tar") || mime.includes("rar"))
-    return <Archive size={size} className="text-warning" />;
-  return <FileText size={size} className="text-base-content/40" />;
-}
-
-// Thumbnail cell — lazy loads from IndexedDB / Telegram
-function ThumbCell({ file, onPreview }: { file: CachedFile; onPreview: () => void }) {
-  const [thumb, setThumb] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!file.mimeType.startsWith("image/")) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) return;
-      observer.disconnect();
-      getThumbnail(file).then(setThumb).catch(() => {});
-    }, { threshold: 0.1 });
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [file]);
-
-  return (
-    <div
-      ref={ref}
-      className="w-14 h-14 rounded-lg overflow-hidden bg-base-300 flex items-center justify-center flex-shrink-0 cursor-pointer group-hover:ring-2 ring-primary/30 transition-all"
-      onClick={file.mimeType.startsWith("image/") || file.mimeType.startsWith("video/") ? onPreview : undefined}
-    >
-      {thumb
-        ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-        : <div className="flex items-center justify-center w-full h-full">
-            {fileIcon(file.mimeType, 22)}
-          </div>
-      }
-    </div>
-  );
-}
 
 export default function DrivePage() {
   const { folderId } = useParams<{ folderId?: string }>();
@@ -75,7 +33,6 @@ export default function DrivePage() {
   const [showUpload, setShowUpload] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [previewingFile, setPreviewingFile] = useState<CachedFile | null>(null);
   const [sharingFile, setSharingFile] = useState<CachedFile | null>(null);
 
   // Dynamic Resizable & Collapsible Sidebar
@@ -190,7 +147,16 @@ export default function DrivePage() {
     finally { setDeletingId(null); }
   };
 
-  const canPreview = (f: CachedFile) => f.mimeType.startsWith("image/") || f.mimeType.startsWith("video/");
+  const handleOpenFile = (file: CachedFile) => {
+    const isVideoOrAudio = file.mimeType.startsWith("video/") ||
+      file.mimeType.startsWith("audio/") ||
+      Boolean(file.name.match(/\.(mp4|mkv|webm|mov|avi|m4v|mp3|m4a|flac)$/i));
+    if (isVideoOrAudio) {
+      window.open(`https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`, "_blank", "noopener,noreferrer");
+    } else {
+      downloadFile(file);
+    }
+  };
 
   const getChatBadge = (c?: CachedFolder) => {
     if (!c) return null;
@@ -438,60 +404,35 @@ export default function DrivePage() {
               </div>
             ) : viewMode === "grid" ? (
               /* ── Grid view ── */
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
                 {files.map((file) => (
-                  <div key={file.id} className="group relative bg-base-200/70 border border-base-300/50 rounded-xl overflow-hidden hover:bg-base-200 hover:shadow-md transition-all">
-                    {/* Thumbnail area */}
-                    <div
-                      className="aspect-square flex items-center justify-center bg-base-300/50 cursor-pointer overflow-hidden"
-                      onClick={() => canPreview(file) && setPreviewingFile(file)}
-                    >
-                      {file.mimeType.startsWith("image/")
-                        ? <ThumbCell file={file} onPreview={() => setPreviewingFile(file)} />
-                        : <div className="flex flex-col items-center gap-2 p-4">
-                            {fileIcon(file.mimeType, 32)}
-                          </div>
-                      }
+                  <div
+                    key={file.id}
+                    onClick={() => handleOpenFile(file)}
+                    className="group relative bg-base-200/70 border border-base-300/50 rounded-xl overflow-hidden hover:bg-base-200 hover:shadow-md transition-all cursor-pointer p-3.5"
+                    title="Click to stream"
+                  >
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <p className="text-xs font-medium truncate flex-1 hover:text-primary transition-colors" title={file.name}>{file.name}</p>
+                      {file.parts && file.parts.length > 1 && (
+                        <span className="badge badge-info badge-xs flex-shrink-0 font-medium">{file.parts.length}P</span>
+                      )}
                     </div>
-                    <div className="p-2.5">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <p className="text-xs font-medium truncate flex-1" title={file.name}>{file.name}</p>
-                        {file.parts && file.parts.length > 1 && (
-                          <span className="badge badge-info badge-xs flex-shrink-0 font-medium">{file.parts.length}P</span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-base-content/40 mt-0.5">
-                        <span>{file.size ? formatSize(file.size) : "—"}</span>
-                        <span>{new Date(file.date).toLocaleDateString()}</span>
-                      </div>
+                    <div className="flex items-center justify-between text-[11px] text-base-content/40 mt-1">
+                      <span>{file.size ? formatSize(file.size) : "—"}</span>
+                      <span>{new Date(file.date).toLocaleDateString()}</span>
                     </div>
                     {/* Action overlay */}
-                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {(file.mimeType.startsWith("video/") || file.name.match(/\.(mp4|mkv|webm|mov|avi)$/i)) && (
-                        <a
-                          href={`https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-xs btn-circle bg-secondary text-secondary-content border-0 shadow-sm"
-                          title="Stream via OCI HLS Player"
-                        >
-                          <Play size={11} fill="currentColor" />
-                        </a>
-                      )}
-                      {canPreview(file) && (
-                        <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm" onClick={() => setPreviewingFile(file)} title="Preview">
-                          <Eye size={12} />
-                        </button>
-                      )}
-                      <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 text-primary shadow-sm" onClick={() => setSharingFile(file)} title="Share link">
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                      <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 text-primary shadow-sm" onClick={(e) => { e.stopPropagation(); setSharingFile(file); }} title="Share link">
                         <Share2 size={12} />
                       </button>
-                      <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm" onClick={() => downloadFile(file)} title="Download">
+                      <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm" onClick={(e) => { e.stopPropagation(); downloadFile(file); }} title="Download">
                         <Download size={12} />
                       </button>
                       <button
                         className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 text-error shadow-sm"
-                        onClick={() => handleDeleteFile(file)}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteFile(file); }}
                         disabled={deletingId === file.id}
                         title="Delete"
                       >
@@ -507,7 +448,7 @@ export default function DrivePage() {
                 <table className="table table-sm w-full">
                   <thead>
                     <tr className="text-base-content/50 text-xs border-base-300">
-                      <th className="w-14"></th>
+                      <th className="w-12 text-center">#</th>
                       <th>Name</th>
                       <th className="hidden sm:table-cell">Size</th>
                       <th className="hidden md:table-cell">Date</th>
@@ -515,17 +456,19 @@ export default function DrivePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {files.map((file) => (
-                      <tr key={file.id} className="hover:bg-base-200/80 border-base-300 group">
-                        <td className="py-2">
-                          <ThumbCell file={file} onPreview={() => setPreviewingFile(file)} />
+                    {files.map((file, idx) => (
+                      <tr
+                        key={file.id}
+                        onClick={() => handleOpenFile(file)}
+                        className="hover:bg-base-200/80 border-base-300 group cursor-pointer transition-colors"
+                        title="Click to stream video"
+                      >
+                        <td className="text-center text-xs text-base-content/40 font-mono select-none">
+                          {idx + 1}
                         </td>
                         <td>
                           <div className="flex items-center gap-2">
-                            <span
-                              className={`text-sm truncate max-w-[240px] sm:max-w-md block ${canPreview(file) ? "cursor-pointer hover:text-primary transition-colors font-medium" : ""}`}
-                              onClick={() => canPreview(file) && setPreviewingFile(file)}
-                            >
+                            <span className="text-sm truncate max-w-[280px] sm:max-w-md block hover:text-primary transition-colors font-medium">
                               {file.name}
                             </span>
                             {file.parts && file.parts.length > 1 && (
@@ -542,32 +485,24 @@ export default function DrivePage() {
                           {new Date(file.date).toLocaleDateString()}
                         </td>
                         <td>
-                          <div className="flex items-center justify-end gap-1.5">
-                            {(file.mimeType.startsWith("video/") || file.name.match(/\.(mp4|mkv|webm|mov|avi)$/i)) && (
-                              <a
-                                href={`https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="btn btn-ghost btn-xs text-secondary gap-1 hover:bg-secondary/15 font-medium"
-                                title="Stream video online"
-                              >
-                                <Play size={12} fill="currentColor" /> Stream
-                              </a>
-                            )}
-                            {canPreview(file) && (
-                              <button className="btn btn-ghost btn-xs btn-circle" onClick={() => setPreviewingFile(file)} title="Preview">
-                                <Eye size={13} />
-                              </button>
-                            )}
-                            <button className="btn btn-ghost btn-xs btn-circle text-primary" onClick={() => setSharingFile(file)} title="Share link">
+                          <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="btn btn-ghost btn-xs btn-circle text-primary"
+                              onClick={(e) => { e.stopPropagation(); setSharingFile(file); }}
+                              title="Share link"
+                            >
                               <Share2 size={13} />
                             </button>
-                            <button className="btn btn-ghost btn-xs btn-circle" onClick={() => downloadFile(file)} title="Download">
+                            <button
+                              className="btn btn-ghost btn-xs btn-circle"
+                              onClick={(e) => { e.stopPropagation(); downloadFile(file); }}
+                              title="Download"
+                            >
                               <Download size={13} />
                             </button>
                             <button
                               className="btn btn-ghost btn-xs btn-circle text-error"
-                              onClick={() => handleDeleteFile(file)}
+                              onClick={(e) => { e.stopPropagation(); handleDeleteFile(file); }}
                               disabled={deletingId === file.id}
                               title="Delete"
                             >
@@ -591,13 +526,6 @@ export default function DrivePage() {
       )}
       {showNewFolder && (
         <NewFolderModal onDone={() => { setShowNewFolder(false); load(); }} onClose={() => setShowNewFolder(false)} />
-      )}
-      {previewingFile && (
-        <PreviewModal
-          file={previewingFile}
-          onClose={() => setPreviewingFile(null)}
-          onDownload={() => { downloadFile(previewingFile); setPreviewingFile(null); }}
-        />
       )}
       {sharingFile && (
         <ShareModal
