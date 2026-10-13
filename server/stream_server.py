@@ -2705,6 +2705,21 @@ async def on_message_edited(event):
     save_db_video(chat_id, msg_id, file_info)
     logger.info(f"Updated video in db from Telegram edit: {chat_id}/{msg_id} -> '{file_info['name']}'")
 
+@client.on(events.MessageDeleted)
+async def on_message_deleted(event):
+    if not getattr(event, "deleted_ids", None):
+        return
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        for did in event.deleted_ids:
+            cur.execute("DELETE FROM videos WHERE msg_id = ?", (did,))
+        conn.commit()
+        conn.close()
+        logger.info(f"Automatically pruned deleted Telegram messages from cinema db: {event.deleted_ids}")
+    except Exception as e:
+        logger.error(f"Error handling message deletion: {e}")
+
 # ─── INITIALIZATION ───────────────────────────────────────────────────────────
 
 async def on_startup(app):
