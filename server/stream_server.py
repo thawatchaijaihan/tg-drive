@@ -784,27 +784,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       box-shadow: 0 8px 35px rgba(229, 9, 20, 0.7);
       background: linear-gradient(135deg, #f40612 0%, #cc0000 100%);
     }
-    .btn-secondary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(255, 255, 255, 0.12);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #fff;
-      padding: 14px 24px;
-      border-radius: 9999px;
-      font-size: 0.95rem;
-      font-weight: 700;
-      text-decoration: none;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      transition: all 0.2s ease;
-      cursor: pointer;
-    }
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.22);
-      transform: translateY(-1px);
-    }
 
     /* Main Content */
     main {
@@ -957,27 +936,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       font-weight: 500;
     }
 
-    /* Toast Notification */
-    #toast {
-      position: fixed;
-      bottom: 24px; right: 24px;
-      background: rgba(16, 185, 129, 0.95);
-      backdrop-filter: blur(8px);
-      color: #fff;
-      padding: 14px 24px;
-      border-radius: 12px;
-      font-weight: 700;
-      font-size: 0.95rem;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      z-index: 999;
-    }
-    #toast.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
 
     /* Responsive */
     @media (max-width: 900px) {
@@ -1031,12 +989,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           ดูภาพยนตร์
         </a>
-        <button onclick="copyCurrentHeroStream()" class="btn-secondary">
-          <span>🔗</span> คัดลอกลิงก์สตรีม
-        </button>
-        <a href="https://drive.capt-th.work/" target="_blank" class="btn-secondary">
-          <span>📁</span> เปิดใน TG-Drive
-        </a>
       </div>
     </div>
   </div>
@@ -1058,8 +1010,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       <!-- Dynamic render via JS -->
     </div>
   </main>
-
-  <div id="toast">คัดลอกลิงก์สตรีมสำเร็จ!</div>
 
   <script>
     var allMovies = __INITIAL_MOVIES_JSON__;
@@ -1130,16 +1080,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       applyFilter();
     }
 
-    function copyCurrentHeroStream() {
-      if (!currentHeroMovie || !currentHeroMovie.watch_url) return;
-      var fullUrl = window.location.origin + currentHeroMovie.watch_url;
-      navigator.clipboard.writeText(fullUrl).then(function() {
-        var t = document.getElementById('toast');
-        t.innerText = 'คัดลอกลิงก์สตรีมสำเร็จ! นำไปเปิดใน VLC หรือส่งต่อได้ทันที';
-        t.className = 'show';
-        setTimeout(function() { t.className = ''; }, 3000);
-      });
-    }
 
     document.getElementById('searchInput').addEventListener('input', applyFilter);
 
