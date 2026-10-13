@@ -252,7 +252,7 @@ def get_file_info(msg):
                 if attr.file_name:
                     file_name = attr.file_name
 
-    # Parse TGDrive JSON metadata in caption if present
+    # Parse TGDrive metadata or clean plain text in caption if present
     if getattr(msg, "message", None):
         try:
             meta = json.loads(msg.message)
@@ -263,7 +263,9 @@ def get_file_info(msg):
                 if "mime" in meta and meta["mime"]:
                     mime_type = meta["mime"]
         except Exception:
-            pass
+            clean_msg = msg.message.strip()
+            if clean_msg and not clean_msg.startswith("{"):
+                file_name = clean_msg
 
     # Ensure valid mime_type for common video extensions
     fn_lower = file_name.lower()
@@ -2649,30 +2651,20 @@ async def on_media_message(event):
 
     save_db_video(chat_id, msg_id, file_info)
 
-    watch_url = f"{BASE_URL}/watch/{chat_id}/{msg_id}"
-    dl_url = f"{BASE_URL}/dl/{chat_id}/{msg_id}"
+    # In channels/groups or when media already has a caption, do not send a duplicate reply message.
+    # All details, player, and downloads are managed via TG-Drive (https://drive.capt-th.work/) & GAPT-CINEMA.
+    has_caption = bool(getattr(event.message, "message", None) and event.message.message.strip())
+    if event.is_channel or has_caption:
+        logger.info(f"Indexed media {msg_id} in chat {chat_id} cleanly (no clutter reply).")
+        return
 
+    # In private DM without caption, reply with only the clean file name
     icon = "🎬" if is_video else "📁"
-    text = (
-        f"{icon} <b>สร้างลิงก์สตรีมสำเร็จแล้ว!</b>\n\n"
-        f"📄 <b>ชื่อไฟล์:</b> <code>{html.escape(name)}</code>\n"
-        f"📦 <b>ขนาด:</b> <code>{size_mb}</code>\n\n"
-    )
-    if is_video:
-        text += (
-            f"▶️ <b>ดูออนไลน์ Ultra Stream (HLS + P2P WebRTC):</b>\n"
-            f"{watch_url}\n\n"
-        )
-    text += (
-        f"📥 <b>ดาวน์โหลดตรง (Direct Download):</b>\n"
-        f"{dl_url}\n\n"
-        f"⚡ <i>รองรับการดูหลายคนพร้อมกันไม่จำกัดด้วยระบบ P2P WebRTC & Cloudflare CDN</i>"
-    )
-
+    text = f"{icon} <b>{html.escape(name)}</b>"
     try:
         await event.reply(text, parse_mode="html", link_preview=False)
     except Exception as e:
-        logger.error(f"Failed to reply link: {e}")
+        logger.error(f"Failed to reply: {e}")
 
 # ─── INITIALIZATION ───────────────────────────────────────────────────────────
 

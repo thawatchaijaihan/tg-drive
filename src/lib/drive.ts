@@ -263,6 +263,11 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
       } else if (msg.media instanceof Api.MessageMediaPhoto) {
         name = `photo_${msg.id}.jpg`; mimeType = "image/jpeg";
       }
+
+      // Prioritize plain-text caption (e.g. Thai movie titles) over raw internal filename
+      if (msg.message && msg.message.trim() && !msg.message.trim().startsWith("{")) {
+        name = msg.message.trim();
+      }
     }
 
     const file: CachedFile = {
@@ -395,18 +400,10 @@ export async function uploadFile(
       },
     });
 
-    const captionMeta: FileMeta = {
-      v: 2,
-      name: safeName,
-      size: file.size,
-      mime: file.type || "application/octet-stream",
-      uploadedAt: Date.now(),
-      totalParts: 1,
-    };
 
     const message = await client.sendFile(peer, {
       file: uploadedFile,
-      caption: JSON.stringify(captionMeta),
+      caption: safeName,
       forceDocument: true,
       workers: 4,
     });
