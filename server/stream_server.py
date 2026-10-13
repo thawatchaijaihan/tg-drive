@@ -450,7 +450,7 @@ async def get_or_probe_file_info(chat_id: int, msg_id: int):
 
 KNOWN_MOVIES_METADATA = {
     "ธี่หยด": {
-        "title": "ธี่หยด 2 (สมิงเขาขวาง)",
+        "title": "ธี่หยด สมิงเขาขวาง",
         "original_title": "Death Whisperer 2 (2024)",
         "overview": "3 ปีหลังจากการเสียชีวิตของแย้ม 'ยักษ์' ยังคงออกตามล่าวิญญาณชุดดำอย่างไม่ลดละ จนกระทั่งพบเบาะแสว่ามีผีชุดดำสิงสู่ในดงโขมดป่าลึก ยักษ์จึงต้องร่วมมือกับจ่าปันเพื่อปิดบัญชีแค้นก่อนที่ความตายจะพรากคนที่เขารักไปอีกครั้ง",
         "poster_url": "https://image.tmdb.org/t/p/w500/A0fHnpVX8vYQCmvETllWJQ30Mi6.jpg",
@@ -539,12 +539,16 @@ def get_all_movies():
 
         is_faststart = get_faststart_path(chat_id, msg_id) is not None
 
+        # Clean display title based on actual file name (strip extension) as requested by user
+        clean_file_title = file_name.rsplit(".", 1)[0].replace("_", " ").strip()
+        display_title = clean_file_title if clean_file_title else meta["title"]
+
         movies.append({
             "id": f"{chat_id}_{msg_id}",
             "chat_id": chat_id,
             "msg_id": msg_id,
             "file_name": file_name,
-            "title": meta["title"],
+            "title": display_title,
             "original_title": meta["original_title"],
             "overview": meta["overview"],
             "poster_url": meta["poster_url"],
@@ -1033,12 +1037,12 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
         <span class="tag tag-green">⚡ Faststart พร้อมดู</span>
         <span class="tag" style="background: rgba(255,255,255,0.1); color: #fff;">1080p Full HD</span>
       </div>
-      <h1 class="hero-title" id="heroTitle">ธี่หยด 2 (สมิงเขาขวาง)</h1>
+      <h1 class="hero-title" id="heroTitle">ธี่หยด สมิงเขาขวาง</h1>
       <p class="hero-overview" id="heroOverview">
         3 ปีหลังจากการเสียชีวิตของแย้ม 'ยักษ์' ยังคงออกตามล่าวิญญาณชุดดำอย่างไม่ลดละ จนกระทั่งพบเบาะแสว่ามีผีชุดดำสิงสู่ในดงโขมดป่าลึก ยักษ์จึงต้องร่วมมือกับจ่าปันเพื่อปิดบัญชีแค้นก่อนที่ความตายจะพรากคนที่เขารักไปอีกครั้ง
       </p>
       <div class="hero-actions">
-        <a id="heroPlayBtn" href="/watch/4381915212/2" class="btn-play-hero">
+        <a id="heroPlayBtn" href="/watch/4381915212/11" class="btn-play-hero">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           เริ่มเล่นภาพยนตร์
         </a>
@@ -1144,7 +1148,20 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
 
     document.getElementById('searchInput').addEventListener('input', applyFilter);
 
-    // Initial render
+    // Initial render & sync hero banner with active movie
+    if (allMovies && allMovies.length > 0) {
+      var hero = allMovies[0];
+      var ht = document.getElementById('heroTitle');
+      if (ht) ht.innerText = hero.title;
+      var ho = document.getElementById('heroOverview');
+      if (ho && hero.overview) ho.innerText = hero.overview;
+      var hb = document.getElementById('heroPlayBtn');
+      if (hb && hero.watch_url) hb.href = hero.watch_url;
+      if (hero.backdrop_url) {
+        var hbg = document.querySelector('.hero-bg');
+        if (hbg) hbg.style.backgroundImage = 'url(' + hero.backdrop_url + ')';
+      }
+    }
     renderMovies(allMovies);
   </script>
 </body>
@@ -1871,6 +1888,16 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       justify-content: center;
       user-select: none;
       transition: opacity 0.35s ease, transform 0.2s ease;
+    }
+    /* Shift left on Mobile / iOS to avoid native top-right mute speaker button */
+    @media (max-width: 900px), (hover: none) and (pointer: coarse) {
+      .custom-more-wrap {
+        top: 12px;
+        right: 68px;
+      }
+      .more-menu {
+        right: -52px;
+      }
     }
     .custom-more-wrap.fade-out {
       opacity: 0;
