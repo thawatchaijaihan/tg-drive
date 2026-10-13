@@ -34,7 +34,7 @@ export default function ChatSidebar({
   onCollapse,
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<FilterTab>("all");
+  const [tab, setTab] = useState<FilterTab>("drive");
 
   const q = search.trim().toLowerCase();
 
@@ -144,14 +144,6 @@ export default function ChatSidebar({
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-1 text-[11px]">
           <button
             className={`px-2 py-0.5 rounded-full transition-colors ${
-              tab === "all" ? "bg-primary text-primary-content font-medium" : "bg-base-300/60 text-base-content/70 hover:bg-base-300"
-            }`}
-            onClick={() => setTab("all")}
-          >
-            All
-          </button>
-          <button
-            className={`px-2 py-0.5 rounded-full transition-colors ${
               tab === "drive" ? "bg-primary text-primary-content font-medium" : "bg-base-300/60 text-base-content/70 hover:bg-base-300"
             }`}
             onClick={() => setTab("drive")}
@@ -173,6 +165,14 @@ export default function ChatSidebar({
             onClick={() => setTab("groups")}
           >
             👥 Groups
+          </button>
+          <button
+            className={`px-2 py-0.5 rounded-full transition-colors ${
+              tab === "all" ? "bg-primary text-primary-content font-medium" : "bg-base-300/60 text-base-content/70 hover:bg-base-300"
+            }`}
+            onClick={() => setTab("all")}
+          >
+            All
           </button>
         </div>
       </div>
