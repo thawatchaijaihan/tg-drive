@@ -609,7 +609,7 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
         radial-gradient(ellipse at 85% 15%, rgba(56, 189, 248, 0.06), transparent 50%);
     }
 
-    /* Sticky Navigation Bar */
+    /* Sticky Header Bar */
     header {
       position: sticky;
       top: 0;
@@ -618,16 +618,11 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid var(--surface-border);
-      padding: 12px 36px;
+      padding: 14px 36px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 24px;
-    }
-    .nav-left {
-      display: flex;
-      align-items: center;
-      gap: 32px;
+      gap: 20px;
     }
     .brand {
       display: flex;
@@ -662,42 +657,7 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       filter: drop-shadow(0 0 16px rgba(229, 9, 20, 0.4));
       text-transform: uppercase;
     }
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 18px;
-    }
-    .nav-link {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-      font-weight: 600;
-      transition: color 0.2s;
-      cursor: pointer;
-    }
-    .nav-link:hover, .nav-link.active {
-      color: #fff;
-    }
-    .nav-link.badge-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--surface-border);
-      border-radius: 9999px;
-      font-size: 0.8rem;
-    }
-    .nav-link.badge-link:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(255, 255, 255, 0.2);
-    }
 
-    .nav-right {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
     .search-container {
       position: relative;
       width: 260px;
@@ -774,7 +734,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     }
     .tag-imdb { background: rgba(245, 158, 11, 0.2); color: #facc15; border: 1px solid rgba(245, 158, 11, 0.5); }
     .tag-year { background: rgba(255, 255, 255, 0.12); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); }
-    .tag-faststart { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); }
     .tag-quality { background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
     
     .hero-title {
@@ -845,45 +804,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     .btn-secondary:hover {
       background: rgba(255, 255, 255, 0.22);
       transform: translateY(-1px);
-    }
-
-    /* Platform Slogan / Features Bar */
-    .slogan-bar {
-      background: rgba(15, 23, 42, 0.5);
-      border-top: 1px solid var(--surface-border);
-      border-bottom: 1px solid var(--surface-border);
-      padding: 16px 48px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-    .slogan-text {
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: #f1f5f9;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .slogan-highlight {
-      color: #ef4444;
-      font-weight: 800;
-    }
-    .feature-pills {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .pill {
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
     }
 
     /* Main Content */
@@ -980,19 +900,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       color: #facc15;
       display: flex; align-items: center; gap: 4px;
     }
-    .faststart-pill {
-      position: absolute;
-      top: 10px; right: 10px;
-      padding: 4px 8px;
-      border-radius: 6px;
-      background: rgba(16, 185, 129, 0.9);
-      backdrop-filter: blur(6px);
-      font-size: 0.68rem;
-      font-weight: 800;
-      color: #fff;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
     .play-overlay {
       position: absolute;
       inset: 0;
@@ -1075,10 +982,8 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     /* Responsive */
     @media (max-width: 900px) {
       header { padding: 12px 20px; }
-      .nav-links { display: none; }
       .hero-container { padding: 36px 24px; min-height: 440px; height: auto; }
       .hero-title { font-size: 2.2rem; }
-      .slogan-bar { padding: 14px 20px; }
       main { padding: 28px 20px 50px; }
     }
     @media (max-width: 600px) {
@@ -1094,29 +999,17 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <!-- Header Navigation -->
+  <!-- Header Bar -->
   <header>
-    <div class="nav-left">
-      <a href="/" class="brand">
-        <div class="brand-icon">
-          <img src="/cinema-icon.png?v=2" alt="GAPT-CINEMA">
-        </div>
-        <div class="brand-name">GAPT-CINEMA</div>
-      </a>
-      <nav class="nav-links">
-        <a class="nav-link active" onclick="filterCategory('all', null)">หน้าหลัก</a>
-        <a class="nav-link" onclick="filterCategory('thai', null)">ภาพยนตร์ไทย</a>
-        <a class="nav-link" onclick="filterCategory('faststart', null)">⚡ Faststart พร้อมดู</a>
-        <a href="https://drive.capt-th.work/" target="_blank" class="nav-link badge-link">
-          <span>📁</span> TG-Drive Cloud
-        </a>
-      </nav>
-    </div>
-    <div class="nav-right">
-      <div class="search-container">
-        <span class="search-icon">🔍</span>
-        <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
+    <a href="/" class="brand">
+      <div class="brand-icon">
+        <img src="/cinema-icon.png?v=2" alt="GAPT-CINEMA">
       </div>
+      <div class="brand-name">GAPT-CINEMA</div>
+    </a>
+    <div class="search-container">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
     </div>
   </header>
 
@@ -1127,7 +1020,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       <div class="hero-tags">
         <span class="tag tag-imdb" id="heroRating">★ 8.5 IMDB</span>
         <span class="tag tag-year" id="heroYear">2024</span>
-        <span class="tag tag-faststart">⚡ ULTRA STREAM</span>
         <span class="tag tag-quality" id="heroQuality">1080P FULL HD</span>
       </div>
       <h1 class="hero-title" id="heroTitle">ธี่หยด สมิงเขาขวาง</h1>
@@ -1149,21 +1041,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Platform Slogan & Highlights -->
-  <div class="slogan-bar">
-    <div class="slogan-text">
-      <span>🍿</span>
-      <span>GAPT-CINEMA — ศูนย์รวมภาพยนตร์ออนไลน์ความเร็วสูง <span class="slogan-highlight">ไร้โฆษณากวนใจ 100%</span></span>
-    </div>
-    <div class="feature-pills">
-      <span class="pill">🛡️ ไร้มัลแวร์</span>
-      <span class="pill">•</span>
-      <span class="pill">⚡ Ultra Stream Faststart</span>
-      <span class="pill">•</span>
-      <span class="pill">🔊 เสียงใสเต็ม Bitrate</span>
-    </div>
-  </div>
-
   <!-- Catalog Section -->
   <main>
     <div class="section-head">
@@ -1173,7 +1050,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       <div class="filter-tabs">
         <button class="tab-btn active" onclick="filterCategory('all', this)">ทั้งหมด</button>
         <button class="tab-btn" onclick="filterCategory('thai', this)">ภาพยนตร์ไทย</button>
-        <button class="tab-btn" onclick="filterCategory('faststart', this)">⚡ Faststart พร้อมดู</button>
       </div>
     </div>
 
@@ -1201,7 +1077,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
 
       var html = '';
       movies.forEach(function(m) {
-        var faststartBadge = m.faststart_ready ? '<span class="faststart-pill">⚡ Faststart</span>' : '';
         var dur = m.duration_formatted ? m.duration_formatted : (m.size_formatted || '');
         var rating = m.vote_average ? ('⭐ ' + m.vote_average.toFixed(1)) : 'HD';
 
@@ -1210,7 +1085,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
             <div class="poster-wrap">
               <img src="${m.poster_url}" alt="${m.title}" class="poster-img" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60'">
               <span class="card-badge">${rating}</span>
-              ${faststartBadge}
               <div class="play-overlay">
                 <div class="play-btn-circle">
                   <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -1235,9 +1109,7 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       var filtered = allMovies.filter(function(m) {
         var matchQ = !q || m.title.toLowerCase().indexOf(q) !== -1 || m.original_title.toLowerCase().indexOf(q) !== -1;
         var matchCat = true;
-        if (currentFilter === 'faststart') {
-          matchCat = m.faststart_ready;
-        } else if (currentFilter === 'thai') {
+        if (currentFilter === 'thai') {
           matchCat = m.category === 'ภาพยนตร์ไทย';
         }
         return matchQ && matchCat;
@@ -1254,7 +1126,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
         var allBtns = document.querySelectorAll('.tab-btn');
         if (cat === 'all' && allBtns[0]) allBtns[0].classList.add('active');
         if (cat === 'thai' && allBtns[1]) allBtns[1].classList.add('active');
-        if (cat === 'faststart' && allBtns[2]) allBtns[2].classList.add('active');
       }
       applyFilter();
     }
