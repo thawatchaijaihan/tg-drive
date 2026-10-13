@@ -1177,7 +1177,7 @@ async def handle_cinema_portal(request: web.Request):
         charset="utf-8",
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=10"
+            "Cache-Control": "no-cache, no-store, must-revalidate"
         }
     )
 
@@ -2692,6 +2692,18 @@ async def on_media_message(event):
         await event.reply(text, parse_mode="html", link_preview=False)
     except Exception as e:
         logger.error(f"Failed to reply: {e}")
+
+@client.on(events.MessageEdited)
+async def on_message_edited(event):
+    if not event.message or not event.message.media:
+        return
+    file_info = get_file_info(event.message)
+    if not file_info:
+        return
+    chat_id = event.chat_id
+    msg_id = event.message.id
+    save_db_video(chat_id, msg_id, file_info)
+    logger.info(f"Updated video in db from Telegram edit: {chat_id}/{msg_id} -> '{file_info['name']}'")
 
 # ─── INITIALIZATION ───────────────────────────────────────────────────────────
 
