@@ -1,0 +1,385 @@
+/* ═══════════════════════════════════════════════════════════════════
+   GAPT-CINEMA — 10-FOOT LEANBACK TV UI DESIGN SYSTEM
+   Optimized for LG webOS Magic Remote & Smart TVs
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root {
+  --bg-dark: #060913;
+  --bg-card: rgba(15, 23, 42, 0.75);
+  --border-focus: #38bdf8;
+  --glow-cyan: rgba(56, 189, 248, 0.6);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --badge-gold: #f59e0b;
+  --badge-blue: #0284c7;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
+  user-select: none;
+  scrollbar-width: none; /* Hide scrollbar for TV */
+}
+
+html::-webkit-scrollbar, body::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── DYNAMIC HERO BACKDROP ─────────────────────────────────────────── */
+.cinema-backdrop {
+  min-height: 100vh;
+  background-size: cover;
+  background-position: top center;
+  background-attachment: fixed;
+  transition: background-image 0.4s ease-in-out;
+  padding: 30px 60px 80px 60px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── TV HEADER ─────────────────────────────────────────────────────── */
+.tv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  margin-bottom: 25px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo-icon {
+  font-size: 2.2rem;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.8));
+}
+
+.logo-text {
+  font-size: 1.8rem;
+  font-weight: 900;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, #FFFDE0 0%, #FDE047 25%, #F59E0B 70%, #D97706 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.55));
+}
+
+.search-box {
+  flex: 1;
+  max-width: 650px;
+}
+
+.tv-search-input {
+  width: 100%;
+  padding: 14px 28px;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.85);
+  border: 2px solid rgba(148, 163, 184, 0.3);
+  border-radius: 40px;
+  outline: none;
+  backdrop-filter: blur(12px);
+  transition: all 0.25s ease;
+}
+
+.tv-search-input:focus {
+  border-color: var(--border-focus);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 0 30px var(--glow-cyan);
+  transform: scale(1.02);
+}
+
+.tv-clock {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 8px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ─── HERO FEATURED SECTION ─────────────────────────────────────────── */
+.hero-featured {
+  margin-bottom: 40px;
+  max-width: 900px;
+}
+
+.hero-badges {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.badge-quality {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 800;
+  padding: 4px 12px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+}
+
+.badge-year {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.badge-star {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  font-size: 0.95rem;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.hero-title {
+  font-size: 3.2rem;
+  font-weight: 900;
+  line-height: 1.15;
+  margin-bottom: 16px;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+.hero-overview {
+  font-size: 1.25rem;
+  line-height: 1.6;
+  color: #cbd5e1;
+  margin-bottom: 24px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+}
+
+.btn-play {
+  background: linear-gradient(135deg, #38bdf8, #0284c7);
+  color: #fff;
+  border: none;
+  font-size: 1.3rem;
+  font-weight: 800;
+  padding: 16px 36px;
+  border-radius: 40px;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(2, 132, 199, 0.5);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.btn-play:focus, .btn-play:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 40px rgba(56, 189, 248, 0.85);
+  outline: 3px solid #fff;
+}
+
+/* ─── CATALOG POSTER GRID ───────────────────────────────────────────── */
+.catalog-section {
+  flex: 1;
+}
+
+.section-title {
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin-bottom: 24px;
+  letter-spacing: 1px;
+  color: #e2e8f0;
+}
+
+.movie-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 28px;
+  padding-bottom: 40px;
+}
+
+/* ─── POSTER CARD WITH VIBRANT CYAN FOCUS RING ──────────────────────── */
+.poster-card {
+  position: relative;
+  background: var(--bg-card);
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 3px solid transparent;
+  outline: none;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.22s ease,
+              box-shadow 0.22s ease;
+}
+
+.card-img-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.card-img-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.badge-rating {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  color: #fbbf24;
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.card-info {
+  padding: 12px 14px;
+  background: rgba(10, 15, 28, 0.95);
+}
+
+.card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.card-year {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* ⚡ KEY TV FOCUS STATE: Glowing Cyan 10-foot UI Highlight */
+.poster-card:focus,
+.poster-card.focused {
+  border-color: var(--border-focus);
+  transform: scale(1.08) translateY(-6px);
+  box-shadow: 0 12px 35px rgba(56, 189, 248, 0.7),
+              0 0 20px rgba(56, 189, 248, 0.5);
+  z-index: 20;
+}
+
+.poster-card:focus .card-img-wrap img,
+.poster-card.focused .card-img-wrap img {
+  transform: scale(1.04);
+}
+
+/* ─── FULLSCREEN HARDWARE VIDEO PLAYER ──────────────────────────────── */
+.fullscreen-player-hidden {
+  display: none !important;
+}
+
+.fullscreen-player-visible {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.player-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.video-screen,
+.video-screen:focus,
+.video-screen:focus-visible {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.player-overlay {
+  position: absolute;
+  top: 30px;
+  left: 40px;
+  right: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+  padding: 16px 24px;
+  border-radius: 12px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.player-wrapper:hover .player-overlay,
+.player-wrapper:focus-within .player-overlay {
+  opacity: 1;
+}
+
+.btn-close-player {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+  border: none;
+  font-size: 1.15rem;
+  font-weight: 700;
+  padding: 10px 24px;
+  border-radius: 30px;
+  cursor: pointer;
+  outline: none;
+}
+
+.btn-close-player:focus {
+  outline: 3px solid #fff;
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.9);
+}
+
+.player-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}

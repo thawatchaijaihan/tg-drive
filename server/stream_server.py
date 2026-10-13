@@ -1775,44 +1775,74 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent !important;
+      -webkit-focus-ring-color: transparent !important;
+    }
+    *:focus,
+    *:focus-visible,
+    *:active {
+      outline: none !important;
+      outline-width: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
     html, body {
       width: 100vw;
       height: 100vh;
-      background: #000;
+      background: #000 !important;
       overflow: hidden;
       margin: 0;
       padding: 0;
+      border: none !important;
+      outline: none !important;
       display: flex;
       align-items: center;
       justify-content: center;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
-    #player-container {
+    #player-container,
+    #player-container:fullscreen,
+    #player-container:-webkit-full-screen,
+    #player-container:-moz-full-screen,
+    #player-container:-ms-fullscreen {
       position: relative;
       width: 100vw;
       height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #000;
+      background: #000 !important;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
     }
-    #player-container:fullscreen {
-      width: 100vw;
-      height: 100vh;
-    }
-    #player-container:-webkit-full-screen {
-      width: 100vw;
-      height: 100vh;
-    }
-    video {
+    video,
+    video:focus,
+    video:focus-visible,
+    video:fullscreen,
+    video:-webkit-full-screen,
+    video:-moz-full-screen,
+    video:-ms-fullscreen {
       width: 100%;
       height: 100%;
       max-width: 100vw;
       max-height: 100vh;
       object-fit: contain;
-      background: #000;
-      outline: none;
+      background: #000 !important;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+    video::-webkit-media-controls,
+    video::-webkit-media-controls-panel,
+    video::-webkit-media-controls-enclosure {
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
     }
 
     /* Hide Chromium native overflow button */
@@ -2002,8 +2032,8 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <div id="player-container">
-    <video id="video-player" src="__STREAM_URL__" playsinline controls controlslist="nodownload noplaybackrate noremoteplayback" disablepictureinpicture autoplay preload="auto"></video>
+  <div id="player-container" tabindex="-1">
+    <video id="video-player" tabindex="-1" src="__STREAM_URL__" playsinline controls controlslist="nodownload noplaybackrate noremoteplayback" disablepictureinpicture autoplay preload="auto"></video>
 
     <!-- Top-Right Settings & Options Wrap (YouTube / Netflix Style) -->
     <div class="custom-more-wrap" id="custom-more-wrap">
@@ -2342,6 +2372,16 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       } else {
         document.exitFullscreen?.();
       }
+    });
+
+    // Auto-blur video element on TV to prevent spatial navigation focus outline
+    video.addEventListener('focus', () => { video.blur(); });
+    ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
+      document.addEventListener(evt, () => {
+        if (document.activeElement && (document.activeElement.tagName === 'VIDEO' || document.activeElement.id === 'player-container')) {
+          document.activeElement.blur();
+        }
+      });
     });
 
     document.addEventListener('DOMContentLoaded', initPlayer);
