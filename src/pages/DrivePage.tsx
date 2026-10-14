@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Folder,
   Upload, FolderPlus, Download, Trash2, ChevronLeft,
-  RefreshCw, Loader2, LayoutGrid, List, Share2, Sparkles,
+  RefreshCw, Loader2, LayoutGrid, List, Share2, Sparkles, CheckCircle2,
   Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User,
   PanelLeftClose, PanelLeftOpen, GripVertical
 } from "lucide-react";
@@ -33,6 +33,16 @@ export default function DrivePage() {
   const [showUpload, setShowUpload] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [convertedIds, setConvertedIds] = useState<number[]>([11]);
+
+  useEffect(() => {
+    fetch("https://stream.capt-th.work/api/converted")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) setConvertedIds(data);
+      })
+      .catch(() => {});
+  }, []);
   const [sharingFile, setSharingFile] = useState<CachedFile | null>(null);
 
   // Dynamic Resizable & Collapsible Sidebar
@@ -432,7 +442,7 @@ export default function DrivePage() {
               <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
                 {files.map((file) => {
                   const isVideo = file.mimeType.startsWith("video/") || Boolean(file.name.match(/\.(mp4|mkv|webm|mov|avi|m4v|flac)$/i));
-                  const isFaststart = file.name.toLowerCase().includes("faststart");
+                  const isConverted = Boolean(file.isConverted) || convertedIds.includes(file.messageId) || file.name.toLowerCase().includes("faststart");
                   return (
                   <div
                     key={file.id}
@@ -453,13 +463,22 @@ export default function DrivePage() {
                     {/* Action overlay */}
                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                       {isVideo && (
-                        <button
-                          className={`btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm ${isFaststart ? "text-success/70" : "text-amber-400 hover:bg-amber-400/20"}`}
-                          onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
-                          title={isFaststart ? "แปลง Faststart แล้ว (คลิกเพื่อเปิดแปลงซ้ำบน Colab)" : "แปลงไฟล์ด้วย Google Colab (สำหรับ Smart TV)"}
-                        >
-                          <Sparkles size={12} className={isFaststart ? "" : "animate-pulse"} />
-                        </button>
+                        isConverted ? (
+                          <span
+                            className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm cursor-default pointer-events-none text-emerald-400 opacity-80"
+                            title="แปลงแล้ว (พร้อมเล่นบน Smart TV)"
+                          >
+                            <CheckCircle2 size={12} />
+                          </span>
+                        ) : (
+                          <button
+                            className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm text-amber-400 hover:bg-amber-400/20"
+                            onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
+                            title="ยังไม่ได้แปลง (คลิกเพื่อเปิดแปลงไฟล์บน Google Colab)"
+                          >
+                            <Sparkles size={12} className="animate-pulse" />
+                          </button>
+                        )
                       )}
                       <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 text-primary shadow-sm" onClick={(e) => { e.stopPropagation(); setSharingFile(file); }} title="Share link">
                         <Share2 size={12} />
@@ -495,7 +514,7 @@ export default function DrivePage() {
                   <tbody>
                     {files.map((file, idx) => {
                       const isVideo = file.mimeType.startsWith("video/") || Boolean(file.name.match(/\.(mp4|mkv|webm|mov|avi|m4v|flac)$/i));
-                      const isFaststart = file.name.toLowerCase().includes("faststart");
+                      const isConverted = Boolean(file.isConverted) || convertedIds.includes(file.messageId) || file.name.toLowerCase().includes("faststart");
                       return (
                       <tr
                         key={file.id}
@@ -527,13 +546,22 @@ export default function DrivePage() {
                         <td>
                           <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                             {isVideo && (
-                              <button
-                                className={`btn btn-ghost btn-xs btn-circle ${isFaststart ? "text-success/70" : "text-amber-400 hover:bg-amber-400/20"}`}
-                                onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
-                                title={isFaststart ? "แปลง Faststart แล้ว (คลิกเพื่อเปิดแปลงซ้ำบน Colab)" : "แปลงไฟล์ด้วย Google Colab (สำหรับ Smart TV)"}
-                              >
-                                <Sparkles size={13} className={isFaststart ? "" : "animate-pulse"} />
-                              </button>
+                              isConverted ? (
+                                <span
+                                  className="btn btn-ghost btn-xs btn-circle cursor-default pointer-events-none text-emerald-400 opacity-80"
+                                  title="แปลงแล้ว (พร้อมเล่นบน Smart TV)"
+                                >
+                                  <CheckCircle2 size={13} />
+                                </span>
+                              ) : (
+                                <button
+                                  className="btn btn-ghost btn-xs btn-circle text-amber-400 hover:bg-amber-400/20 shadow-sm"
+                                  onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
+                                  title="ยังไม่ได้แปลง (คลิกเพื่อเปิดแปลงไฟล์บน Google Colab)"
+                                >
+                                  <Sparkles size={13} className="animate-pulse" />
+                                </button>
+                              )
                             )}
                             <button
                               className="btn btn-ghost btn-xs btn-circle text-primary"

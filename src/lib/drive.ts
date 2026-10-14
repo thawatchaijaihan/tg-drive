@@ -244,9 +244,13 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
     }
 
     let name: string, size: number, mimeType: string, date: number;
+    let isConverted = false;
 
     if (meta) {
       name = meta.name; size = meta.size; mimeType = meta.mime; date = meta.uploadedAt;
+      if (meta.name?.toLowerCase().includes("faststart") || (meta as any).faststart) {
+        isConverted = true;
+      }
     } else {
       name = `file_${msg.id}`; size = 0; mimeType = "application/octet-stream"; date = msg.date * 1000;
 
@@ -259,6 +263,13 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
             (a): a is Api.DocumentAttributeFilename => a instanceof Api.DocumentAttributeFilename
           );
           name = nameAttr?.fileName ?? name;
+
+          const videoAttr = doc.attributes.find(
+            (a): a is Api.DocumentAttributeVideo => a instanceof Api.DocumentAttributeVideo
+          );
+          if (videoAttr && videoAttr.supportsStreaming) {
+            isConverted = true;
+          }
         }
       } else if (msg.media instanceof Api.MessageMediaPhoto) {
         name = `photo_${msg.id}.jpg`; mimeType = "image/jpeg";
@@ -270,9 +281,13 @@ export async function getFiles(folderId: string): Promise<CachedFile[]> {
       }
     }
 
+    if (name.toLowerCase().includes("faststart")) {
+      isConverted = true;
+    }
+
     const file: CachedFile = {
       id: `${folderId}_${msg.id}`,
-      folderId, messageId: msg.id, name, size, mimeType, date, mediaRef: "",
+      folderId, messageId: msg.id, name, size, mimeType, date, mediaRef: "", isConverted,
     };
     rawList.push(file);
     await db.files.put(file);

@@ -31,6 +31,7 @@ export interface CachedFile {
   date: number;
   mediaRef: string;
   parts?: { messageId: number; partIndex: number; size: number }[];
+  isConverted?: boolean;
 }
 
 export interface CachedThumb {

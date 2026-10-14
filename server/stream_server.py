@@ -1637,6 +1637,55 @@ async def handle_colab_target_options(request: web.Request):
         "Access-Control-Allow-Headers": "Content-Type",
     })
 
+
+# ─── CONVERTED MOVIES TRACKER ────────────────────────────────────────────────
+CONVERTED_FILE = BASE_DIR / "cache" / "converted_ids.json"
+CONVERTED_IDS = {11}
+
+def load_converted_ids():
+    global CONVERTED_IDS
+    try:
+        if CONVERTED_FILE.exists():
+            with open(CONVERTED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                CONVERTED_IDS.update(data)
+    except Exception as e:
+        logger.error(f"Error loading converted IDs: {e}")
+
+def save_converted_ids():
+    try:
+        CONVERTED_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONVERTED_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(CONVERTED_IDS), f)
+    except Exception as e:
+        logger.error(f"Error saving converted IDs: {e}")
+
+load_converted_ids()
+
+async def handle_converted_get(request: web.Request):
+    return web.json_response(list(CONVERTED_IDS), headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_converted_post(request: web.Request):
+    global CONVERTED_IDS
+    try:
+        data = await request.json()
+        mid = data.get("msg_id")
+        if mid:
+            CONVERTED_IDS.add(int(mid))
+            save_converted_ids()
+            logger.info(f"Marked msg_id {mid} as converted!")
+            return web.json_response({"status": "ok", "converted": list(CONVERTED_IDS)}, headers={"Access-Control-Allow-Origin": "*"})
+        return web.json_response({"error": "missing msg_id"}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_converted_options(request: web.Request):
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    })
+
 async def handle_colab_target_get(request: web.Request):
     return web.json_response(CURRENT_COLAB_TARGET, headers={"Access-Control-Allow-Origin": "*"})
 
@@ -3499,6 +3548,9 @@ def create_app():
     app.router.add_get("/cinema-icon.png", handle_cinema_icon)
     app.router.add_get("/", handle_cinema_portal)
     app.router.add_get("/cinema", handle_cinema_portal)
+    app.router.add_get("/api/converted", handle_converted_get)
+    app.router.add_post("/api/converted", handle_converted_post)
+    app.router.add_options("/api/converted", handle_converted_options)
     app.router.add_get("/api/colab/target", handle_colab_target_get)
     app.router.add_post("/api/colab/target", handle_colab_target_post)
     app.router.add_options("/api/colab/target", handle_colab_target_options)
