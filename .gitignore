@@ -48,5 +48,10 @@ venv/
 # FileStream Cache & Transcoded Media
 server/cache/
 server/transcoded/
+
+# Rust Build Artifacts
+target/
+Cargo.lock
+
 cache/
 transcoded/

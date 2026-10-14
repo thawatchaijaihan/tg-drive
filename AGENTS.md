@@ -50,10 +50,11 @@ tg-drive/
    - **NEVER** hardcode or commit `API_ID`, `API_HASH`, or Telegram `BOT_TOKEN`.
    - All credentials on the server are read strictly from environment variables or `/home/ubuntu/tg-filestream/.env`.
    - Never commit `*.session`, `*.db`, `cache/`, or `transcoded/` files.
-2. **⚡ High-Performance Streaming:**
+2. **⚡ High-Performance Streaming & Web Player:**
    - The streaming server runs directly on OCI (Port 8085) with an active Telethon MTProto client connection.
    - Video streaming supports HTTP 206 Partial Content (range requests) and adaptive HLS multi-bitrate transcoding.
    - P2P WebRTC Swarm (`p2p-media-loader`) is enabled in the embedded HTML5 player to offload bandwidth.
+   - Desktop and Mobile `/watch` endpoint uses a custom HTML5 player with full seekbar timeline, play/pause, volume slider, time indicator, and fullscreen, while Smart TV uses native controls tuned for Magic Remote.
 3. **🌐 Frontend Zero-Backend Direct MTProto:**
    - The frontend connects directly from the browser to Telegram servers via WebSockets using GramJS.
    - Client session data is persisted locally in IndexedDB; no credentials pass through any intermediate server.

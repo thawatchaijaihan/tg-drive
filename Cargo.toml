@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rust-server",
+    "tv-ui",
+]
+resolver = "2"

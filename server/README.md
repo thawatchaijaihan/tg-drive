@@ -9,11 +9,14 @@ Direct streaming server and web video player bridging Telegram channels and MTPr
 - **Direct MTProto Streaming:** Streams video, audio, and large files directly from Telegram storage using Telethon without downloading the entire file first.
 - **HTTP Range Requests:** Supports seeking in video/audio players (`206 Partial Content`).
 - **HLS Dynamic Transcoding:** On-demand and pre-transcoding into multi-bitrate HLS streams (1080p, 720p, 480p, and Fast Direct Stream) using FFmpeg.
-- **Embedded Web Video Player:**
-  - Modern dark-themed video player with custom UI.
-  - Multi-rendition quality selector.
+- **Embedded Web Video Player (`/watch`):**
+  - Modern dark-themed custom video player with glassmorphic control bar.
+  - Interactive scrubbable timeline with buffer indicator and hover preview timestamp.
+  - Full playback controls: Play/Pause, Rewind 10s, Forward 10s, Time current/duration.
+  - Volume button with hover slider and localStorage volume memory.
+  - Multi-rendition quality selector (AUTO, UHD, FHD, HD, SD) and playback speed selector (0.5x - 2.0x).
   - P2P WebRTC Swarm integration (`p2p-media-loader-hlsjs`) to minimize server bandwidth when multiple viewers watch simultaneously.
-  - Picture-in-Picture, speed controls, keyboard shortcuts, volume memory.
+  - Fullscreen toggle, Picture-in-Picture, keyboard shortcuts (Space, F, M, J, L, Arrow keys), and auto-hiding controls on mouse idle.
 - **LRU Cache Engine:** Fast disk cache with LRU eviction policy (up to 20 GB) for instant segment replay and lower latency.
 - **Cloudflare Tunnel Integration:** Reverse proxied via Cloudflare Tunnel at `https://stream.capt-th.work`.
 

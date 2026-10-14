@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAPT-CINEMA — TV Leanback</title>
+  <link rel="icon" type="image/png" href="cinema-icon.png">
+  <link rel="stylesheet" href="tv.css">
+</head>
+<body>
+  <!-- Fullscreen Hardware Video Player Container -->
+  <div id="fullscreen-player-container" class="fullscreen-player-hidden"></div>
+
+  <!-- Main TV Leanback Application Root -->
+  <div id="app">
+    <div style="display: flex; height: 100vh; align-items: center; justify-content: center; flex-direction: column; gap: 20px;">
+      <img src="cinema-icon.png" alt="GAPT-CINEMA" style="width: 72px; height: 72px; object-fit: contain;">
+      <div style="font-size: 1.5rem; font-weight: 700; color: #38bdf8;">กำลังโหลด GAPT-CINEMA...</div>
+    </div>
+  </div>
+
+  <!-- Bootstrapping Rust WebAssembly UI -->
+  <script type="module">
+    import init, { TvApp } from './pkg/tv_ui.js';
+
+    async function bootstrap() {
+      try {
+        await init();
+        const app = new TvApp();
+        app.init();
+      } catch (err) {
+        console.warn("WASM init fallback:", err);
+        // Fallback vanilla JS bridge if WASM was not compiled
+        loadVanillaFallback();
+      }
+    }
+
+    async function loadVanillaFallback() {
+      const resp = await fetch('/api/movies');
+      const movies = await resp.json();
+      
+      const appEl = document.getElementById('app');
+      let focused = 0;
+
+      function render() {
+        const m = movies[focused] || movies[0];
+        const backdrop = m ? m.backdrop_url : '';
+        const title = m ? m.title : 'GAPT-CINEMA';
+        const overview = m ? m.overview : '';
+        const year = m ? m.release_date.slice(0, 4) : '2024';
+        const rating = m ? m.vote_average.toFixed(1) : '8.0';
+
+        let grid = '';
+        movies.forEach((item, idx) => {
+          const isF = idx === focused;
+          grid += `
+            <div class="poster-card ${isF ? 'focused' : ''}" data-idx="${idx}" tabindex="0">
+              <div class="card-img-wrap">
+                <img src="${item.poster_url}" alt="${item.title}" />
+                <span class="badge-rating">⭐ ${item.vote_average.toFixed(1)}</span>
+              </div>
+              <div class="card-info">
+                <h3 class="card-title">${item.title}</h3>
+                <span class="card-year">${item.release_date.slice(0, 4)}</span>
+              </div>
+            </div>
+          `;
+        });
+
+        appEl.innerHTML = `
+          <div class="cinema-backdrop" style="background-image: linear-gradient(to right, rgba(8, 12, 20, 0.95) 30%, rgba(8, 12, 20, 0.6) 70%, rgba(8, 12, 20, 0.95)), url('${backdrop}');">
+            <header class="tv-header">
+              <div class="brand">
+                <img src="cinema-icon.png" class="logo-icon" alt="GAPT-CINEMA" style="width: 32px; height: 32px; object-fit: contain;">
+                <span class="logo-text">GAPT-CINEMA</span>
+              </div>
+              <div class="search-box">
+                <input type="text" id="tv-search" class="tv-search-input" placeholder="🔍 ค้นหาชื่อภาพยนตร์..." />
+              </div>
+              <div class="tv-clock">TV LEANBACK</div>
+            </header>
+            <section class="hero-featured">
+              <div class="hero-content">
+                <div class="hero-badges">
+                  <span class="badge-quality">4K ULTRA HD</span>
+                  <span class="badge-year">${year}</span>
+                  <span class="badge-star">★ ${rating}</span>
+                </div>
+                <h1 class="hero-title">${title}</h1>
+                <p class="hero-overview">${overview}</p>
+                <div class="hero-actions">
+                  <button class="btn-play" id="btn-hero-play">▶ ดูภาพยนตร์ (กดปุ่มกลางรีโมท)</button>
+                </div>
+              </div>
+            </section>
+            <section class="catalog-section">
+              <h2 class="section-title">ภาพยนตร์ทั้งหมด (${movies.length})</h2>
+              <div class="movie-grid">${grid}</div>
+            </section>
+          </div>
+        `;
+
+        document.querySelectorAll('.poster-card').forEach(card => {
+          card.onclick = () => {
+            const idx = parseInt(card.dataset.idx, 10);
+            playMovie(movies[idx]);
+          };
+        });
+
+        const heroBtn = document.getElementById('btn-hero-play');
+        if (heroBtn && m) heroBtn.onclick = () => playMovie(m);
+      }
+
+      function playMovie(movie) {
+        const c = document.getElementById('fullscreen-player-container');
+        c.className = 'fullscreen-player-visible';
+        c.innerHTML = `
+          <div class="player-wrapper">
+            <video src="${movie.stream_url}" controls autoplay class="video-screen"></video>
+            <div class="player-overlay">
+              <button id="btn-close-player" class="btn-close-player">✕ ย้อนกลับ</button>
+              <div class="player-title">${movie.title}</div>
+            </div>
+          </div>
+        `;
+        document.getElementById('btn-close-player').onclick = () => {
+          c.className = 'fullscreen-player-hidden';
+          c.innerHTML = '';
+        };
+      }
+
+      window.addEventListener('keydown', (e) => {
+        const code = e.keyCode;
+        if (document.getElementById('fullscreen-player-container').classList.contains('fullscreen-player-visible')) {
+          if (code === 27 || code === 461 || e.key === 'Backspace') {
+            e.preventDefault();
+            const c = document.getElementById('fullscreen-player-container');
+            c.className = 'fullscreen-player-hidden';
+            c.innerHTML = '';
+          }
+          return;
+        }
+
+        if (code === 39 && focused + 1 < movies.length) { focused++; render(); }
+        else if (code === 37 && focused > 0) { focused--; render(); }
+        else if (code === 40 && focused + 5 < movies.length) { focused += 5; render(); }
+        else if (code === 38 && focused >= 5) { focused -= 5; render(); }
+        else if (code === 13) { playMovie(movies[focused]); }
+      });
+
+      render();
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>
