@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Share2, Copy, Check, X, ExternalLink, Film, Download } from "lucide-react";
+import { Share2, Copy, Check, X, ExternalLink, Film, Download, Sparkles } from "lucide-react";
 import type { CachedFile } from "../lib/db";
 import { formatSize } from "../lib/drive";
 
@@ -17,6 +17,7 @@ export default function ShareModal({ file, onClose }: Props) {
   const watchUrl = `https://stream.capt-th.work/watch/${file.folderId}/${file.messageId}`;
   const dlUrl = `https://stream.capt-th.work/dl/${file.folderId}/${file.messageId}`;
   const tgUrl = `https://t.me/c/${cleanFolderId}/${file.messageId}`;
+  const colabUrl = `https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb`;
 
   const copy = async (key: string, url: string) => {
     try {
@@ -76,6 +77,30 @@ export default function ShareModal({ file, onClose }: Props) {
                   {copiedKey === "watch" ? "คัดลอกแล้ว" : "คัดลอก"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Google Colab Faststart Optimizer Link (if video) */}
+          {isVideo && (
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-red-500/10 border border-orange-500/30">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold text-orange-400 flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-orange-400" /> แปลงวิดีโอสำหรับ Smart TV (Google Colab)
+                </span>
+                <span className="badge badge-warning badge-xs">GPU T4 ฟรี</span>
+              </div>
+              <p className="text-xs text-base-content/70 mb-2.5">
+                หากวิดีโอเป็น AV1 / HEVC หรือเล่นบนทีวีจอดำ สามารถเปิดสั่งแปลงเป็น H.264 + Faststart ผ่าน Colab ได้ทันที
+              </p>
+              <a
+                href={colabUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-sm bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white border-0 w-full flex items-center justify-center gap-2 shadow-sm font-medium"
+              >
+                <ExternalLink size={14} />
+                เปิด Google Colab เพื่อสั่งแปลงไฟล์
+              </a>
             </div>
           )}
 

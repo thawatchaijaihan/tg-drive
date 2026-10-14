@@ -789,7 +789,52 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       cursor: pointer;
       border: none;
     }
-    .btn-play-hero:hover {
+    
+      .btn-colab-hero {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: rgba(245, 158, 11, 0.16);
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        color: #fbbf24;
+        padding: 14px 28px;
+        border-radius: 9999px;
+        font-size: 1rem;
+        font-weight: 700;
+        text-decoration: none;
+        backdrop-filter: blur(8px);
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        cursor: pointer;
+      }
+      .btn-colab-hero:hover {
+        background: rgba(245, 158, 11, 0.3);
+        border-color: #f59e0b;
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 4px 20px rgba(245, 158, 11, 0.35);
+      }
+      .nav-btn-colab {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        color: #fbbf24;
+        padding: 8px 16px;
+        border-radius: 9999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+      }
+      .nav-btn-colab:hover {
+        background: rgba(245, 158, 11, 0.25);
+        border-color: #f59e0b;
+        color: #fef08a;
+        transform: translateY(-1px);
+      }
+
+      .btn-play-hero:hover {
       transform: translateY(-2px) scale(1.03);
       box-shadow: 0 8px 35px rgba(229, 9, 20, 0.7);
       background: linear-gradient(135deg, #f40612 0%, #cc0000 100%);
@@ -975,9 +1020,15 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       </div>
       <div class="brand-name">GAPT-CINEMA</div>
     </a>
-    <div class="search-container">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
+    <div class="header-right" style="display:flex;align-items:center;gap:12px;">
+      <a href="https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb" target="_blank" class="nav-btn-colab" title="แปลงเป็น H.264 + Faststart ด้วย Google Colab">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span>แปลงไฟล์ด้วย Colab</span>
+      </a>
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
+      </div>
     </div>
   </header>
 
@@ -1903,8 +1954,31 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       text-align: center;
     }
     .top-right-placeholder {
-      width: 80px;
+      width: auto;
     }
+
+    .btn-top-colab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .btn-top-colab:hover {
+      background: rgba(245, 158, 11, 0.3);
+      border-color: #f59e0b;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
+    }
+
 
     /* Center Feedback Pulse Animation */
     .center-feedback {
@@ -2374,7 +2448,10 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
           <span>พอร์ทัลหนัง</span>
         </a>
         <div class="player-title">__FILE_NAME__</div>
-        <div class="top-right-placeholder"></div>
+        <a href="https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb" target="_blank" class="btn-top-colab" title="แปลงเป็น Faststart H.264 ด้วย Google Colab เพื่อเล่นบนทีวี">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <span>แปลงด้วย Colab</span>
+        </a>
       </div>
 
       <!-- Bottom Bar: Timeline & Control Buttons -->
