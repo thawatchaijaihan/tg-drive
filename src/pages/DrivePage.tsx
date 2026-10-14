@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Folder,
   Upload, FolderPlus, Download, Trash2, ChevronLeft,
-  RefreshCw, Loader2, LayoutGrid, List, Share2,
+  RefreshCw, Loader2, LayoutGrid, List, Share2, Sparkles,
   Menu, Bot, Bookmark, Users, Megaphone, HardDrive, User,
   PanelLeftClose, PanelLeftOpen, GripVertical
 } from "lucide-react";
@@ -157,6 +157,31 @@ export default function DrivePage() {
       downloadFile(file);
     }
   };
+
+  const handleOpenColab = async (file: CachedFile) => {
+    const streamUrl = `https://stream.capt-th.work/stream/${file.folderId}/${file.messageId}`;
+    try {
+      await fetch("https://stream.capt-th.work/api/colab/target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: file.folderId,
+          msg_id: file.messageId,
+          title: file.name,
+          stream_url: streamUrl
+        })
+      });
+    } catch {}
+    try {
+      await navigator.clipboard.writeText(streamUrl);
+    } catch {}
+    window.open(
+      "https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb",
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
+
 
   const getChatBadge = (c?: CachedFolder) => {
     if (!c) return null;
@@ -405,7 +430,10 @@ export default function DrivePage() {
             ) : viewMode === "grid" ? (
               /* ── Grid view ── */
               <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
-                {files.map((file) => (
+                {files.map((file) => {
+                  const isVideo = file.mimeType.startsWith("video/") || Boolean(file.name.match(/\.(mp4|mkv|webm|mov|avi|m4v|flac)$/i));
+                  const isFaststart = file.name.toLowerCase().includes("faststart");
+                  return (
                   <div
                     key={file.id}
                     onClick={() => handleOpenFile(file)}
@@ -424,6 +452,15 @@ export default function DrivePage() {
                     </div>
                     {/* Action overlay */}
                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                      {isVideo && (
+                        <button
+                          className={`btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 shadow-sm ${isFaststart ? "text-success/70" : "text-amber-400 hover:bg-amber-400/20"}`}
+                          onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
+                          title={isFaststart ? "แปลง Faststart แล้ว (คลิกเพื่อเปิดแปลงซ้ำบน Colab)" : "แปลงไฟล์ด้วย Google Colab (สำหรับ Smart TV)"}
+                        >
+                          <Sparkles size={12} className={isFaststart ? "" : "animate-pulse"} />
+                        </button>
+                      )}
                       <button className="btn btn-xs btn-circle bg-base-100/90 backdrop-blur-sm border-0 text-primary shadow-sm" onClick={(e) => { e.stopPropagation(); setSharingFile(file); }} title="Share link">
                         <Share2 size={12} />
                       </button>
@@ -440,7 +477,7 @@ export default function DrivePage() {
                       </button>
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             ) : (
               /* ── List view ── */
@@ -452,11 +489,14 @@ export default function DrivePage() {
                       <th>Name</th>
                       <th className="hidden sm:table-cell">Size</th>
                       <th className="hidden md:table-cell">Date</th>
-                      <th className="w-24 text-right">Actions</th>
+                      <th className="w-32 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {files.map((file, idx) => (
+                    {files.map((file, idx) => {
+                      const isVideo = file.mimeType.startsWith("video/") || Boolean(file.name.match(/\.(mp4|mkv|webm|mov|avi|m4v|flac)$/i));
+                      const isFaststart = file.name.toLowerCase().includes("faststart");
+                      return (
                       <tr
                         key={file.id}
                         onClick={() => handleOpenFile(file)}
@@ -486,6 +526,15 @@ export default function DrivePage() {
                         </td>
                         <td>
                           <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            {isVideo && (
+                              <button
+                                className={`btn btn-ghost btn-xs btn-circle ${isFaststart ? "text-success/70" : "text-amber-400 hover:bg-amber-400/20"}`}
+                                onClick={(e) => { e.stopPropagation(); handleOpenColab(file); }}
+                                title={isFaststart ? "แปลง Faststart แล้ว (คลิกเพื่อเปิดแปลงซ้ำบน Colab)" : "แปลงไฟล์ด้วย Google Colab (สำหรับ Smart TV)"}
+                              >
+                                <Sparkles size={13} className={isFaststart ? "" : "animate-pulse"} />
+                              </button>
+                            )}
                             <button
                               className="btn btn-ghost btn-xs btn-circle text-primary"
                               onClick={(e) => { e.stopPropagation(); setSharingFile(file); }}
@@ -511,7 +560,7 @@ export default function DrivePage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               </div>

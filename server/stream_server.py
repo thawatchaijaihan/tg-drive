@@ -1620,6 +1620,47 @@ self.addEventListener('fetch', (e) => {
 
 # ─── BACKGROUND TRANSCODING API ───────────────────────────────────────────────
 
+
+# ─── GOOGLE COLAB TARGET API ──────────────────────────────────────────────────
+CURRENT_COLAB_TARGET = {
+    "stream_url": "https://stream.capt-th.work/stream/-1004381915212/13",
+    "title": "Three Thousand Years of Longing (2022).mp4",
+    "chat_id": -1004381915212,
+    "msg_id": 13,
+    "updated_at": int(time.time())
+}
+
+async def handle_colab_target_options(request: web.Request):
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    })
+
+async def handle_colab_target_get(request: web.Request):
+    return web.json_response(CURRENT_COLAB_TARGET, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_colab_target_post(request: web.Request):
+    global CURRENT_COLAB_TARGET
+    try:
+        data = await request.json()
+        chat_id = data.get("chat_id")
+        msg_id = data.get("msg_id")
+        title = data.get("title", "movie.mp4")
+        stream_url = data.get("stream_url") or f"https://stream.capt-th.work/stream/{chat_id}/{msg_id}"
+        CURRENT_COLAB_TARGET = {
+            "stream_url": stream_url,
+            "title": title,
+            "chat_id": chat_id,
+            "msg_id": msg_id,
+            "updated_at": int(time.time())
+        }
+        logger.info(f"Colab Target updated to: {title} ({stream_url})")
+        return web.json_response({"status": "ok", "target": CURRENT_COLAB_TARGET}, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        logger.error(f"Failed to update colab target: {e}")
+        return web.json_response({"error": str(e)}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+
 async def handle_api_status(request: web.Request):
     try:
         chat_id = int(request.match_info["chat_id"])
@@ -3458,6 +3499,9 @@ def create_app():
     app.router.add_get("/cinema-icon.png", handle_cinema_icon)
     app.router.add_get("/", handle_cinema_portal)
     app.router.add_get("/cinema", handle_cinema_portal)
+    app.router.add_get("/api/colab/target", handle_colab_target_get)
+    app.router.add_post("/api/colab/target", handle_colab_target_post)
+    app.router.add_options("/api/colab/target", handle_colab_target_options)
     app.router.add_get("/api/movies", handle_api_movies)
     app.router.add_get("/health", handle_index)
     app.router.add_get("/sw.js", handle_service_worker)
