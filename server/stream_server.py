@@ -3927,8 +3927,18 @@ async def on_media_message(event):
             target_cid = event.chat_id if event.is_channel else -1003525937661
             in_channel = bool(event.is_channel)
 
+            lower_text = text.lower()
+            quality = "1080p"
+            if "mp3" in lower_text or "audio" in lower_text:
+                quality = "mp3"
+            elif "720" in lower_text:
+                quality = "720p"
+            elif "480" in lower_text:
+                quality = "480p"
+
+            q_label = "MP3 เสียง" if quality == "mp3" else f"{quality} Full HD" if quality == "1080p" else f"{quality} HD"
             status_msg = await event.reply(
-                "⏳ ตรวจพบลิงก์ YouTube! กำลังเริ่มดาวน์โหลดและแปลงเป็น FastStart MP4...",
+                f"⏳ ตรวจพบลิงก์ YouTube ({q_label})! กำลังเริ่มดาวน์โหลดและแปลงเป็น FastStart MP4...",
                 link_preview=False
             )
             task_id = f"yt_{int(time.time())}_{abs(target_cid)}"
@@ -3949,7 +3959,7 @@ async def on_media_message(event):
                     task_id=task_id,
                     url=yt_url,
                     folder_id=target_cid,
-                    quality="1080p",
+                    quality=quality,
                     progress_callback=tg_progress
                 )
                 if res.get("status") == "completed":
