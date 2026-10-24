@@ -5,99 +5,43 @@ import { StringSession } from "telegram/sessions";
 import { PromisedWebSockets } from "telegram/extensions/PromisedWebSockets";
 import { db } from "../lib/db";
 import { useAuth } from "../hooks/useAuth";
-import AdsterraBanner from "../components/AdsterraBanner";
+import { useTheme } from "../context/ThemeContext";
 import {
-  HardDrive, KeyRound, Phone, ShieldCheck,
-  ExternalLink, FolderOpen, Upload, Shield,
-  Code2, Globe, ChevronDown, ChevronUp, Lock, Zap
+  KeyRound, Phone, ShieldCheck, Lock,
+  ChevronDown, ChevronUp, Sun, Moon,
+  Shield, ArrowRight
 } from "lucide-react";
+import { GoogleDriveLogo } from "../components/GoogleDriveIcons";
 
-type Step = "credentials" | "phone" | "otp" | "password";
-
-const STEPS = [
-  {
-    num: "01",
-    title: "Get API credentials",
-    desc: (
-      <>
-        Go to{" "}
-        <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="link link-primary font-medium">
-          my.telegram.org
-        </a>{" "}
-        → Log in → <span className="font-medium text-base-content/80">API Development Tools</span> → create an app. Copy your <span className="font-medium text-base-content/80">API ID</span> and <span className="font-medium text-base-content/80">API Hash</span>.
-      </>
-    ),
-    icon: <KeyRound size={15} className="text-primary" />,
-  },
-  {
-    num: "02",
-    title: "Sign in with your phone",
-    desc: "Paste your API credentials here, enter your Telegram phone number, and verify with the OTP sent to your Telegram app.",
-    icon: <Phone size={15} className="text-primary" />,
-  },
-  {
-    num: "03",
-    title: "Create folders & upload",
-    desc: "Each folder you create becomes a private Telegram channel tagged [TGDrive]. Files you upload are sent as messages inside those channels — stored forever on Telegram's servers.",
-    icon: <FolderOpen size={15} className="text-primary" />,
-  },
-  {
-    num: "04",
-    title: "Access from anywhere",
-    desc: "Your files are tied to your Telegram account, not this device. Log in from any browser and everything is there. Even if you clear your browser, just log in again.",
-    icon: <Globe size={15} className="text-primary" />,
-  },
-];
-
-const FAQS = [
-  {
-    q: "Is my data safe?",
-    a: "Your API credentials and session are stored only in your browser's IndexedDB — nothing is sent to any TGDrive server. Files go directly from your browser to Telegram's servers via the MTProto protocol.",
-  },
-  {
-    q: "What's the storage limit?",
-    a: "Telegram doesn't enforce a storage quota on user accounts. You can upload as much as you want. Individual file size limit is 2 GB per file.",
-  },
-  {
-    q: "What happens if I clear browser data?",
-    a: "Your session and local cache are lost, but your files remain safe on Telegram forever. Just log in again and everything reappears.",
-  },
-  {
-    q: "Is this affiliated with Telegram?",
-    a: "No. TGDrive is an independent open-source tool that uses Telegram's official MTProto API. It is not endorsed by or affiliated with Telegram.",
-  },
-  {
-    q: "Can others see my files?",
-    a: "No. Folders are created as private Telegram channels visible only to your account. No one else has access.",
-  },
-];
+type Step = "phone" | "otp" | "password";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { refresh } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
-  const [step, setStep] = useState<Step>("credentials");
+  const [step, setStep] = useState<Step>("phone");
   const [apiId, setApiId] = useState("33156484");
   const [apiHash, setApiHash] = useState("d23bc5cc206aeb76929cb3ff6481a5eb");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const [client, setClient] = useState<TelegramClient | null>(null);
   const [phoneCodeHash, setPhoneCodeHash] = useState("");
 
-  const handleCredentials = () => {
-    setError("");
-    if (!apiId || !apiHash) return setError("Both API ID and API Hash are required.");
-    if (isNaN(Number(apiId))) return setError("API ID must be a number.");
-    setStep("phone");
-  };
-
   const handlePhone = async () => {
     setError("");
+    if (!phone.trim()) {
+      return setError("Please enter your Telegram phone number.");
+    }
+    if (!apiId || !apiHash) {
+      return setError("API ID and API Hash are required.");
+    }
+
     setLoading(true);
     try {
       const session = new StringSession("");
@@ -107,12 +51,12 @@ export default function LoginPage() {
         networkSocket: PromisedWebSockets,
       });
       await tgClient.connect();
-      const result = await tgClient.sendCode({ apiId: Number(apiId), apiHash }, phone);
+      const result = await tgClient.sendCode({ apiId: Number(apiId), apiHash }, phone.trim());
       setPhoneCodeHash(result.phoneCodeHash);
       setClient(tgClient);
       setStep("otp");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to send code.");
+      setError(e instanceof Error ? e.message : "Failed to send code to Telegram.");
     } finally {
       setLoading(false);
     }
@@ -120,18 +64,21 @@ export default function LoginPage() {
 
   const handleOtp = async () => {
     setError("");
+    if (!otp.trim()) {
+      return setError("Please enter the verification code.");
+    }
     setLoading(true);
     try {
       if (!client) throw new Error("Client not initialized");
       await client.invoke(
         new (await import("telegram/tl")).Api.auth.SignIn({
-          phoneNumber: phone,
+          phoneNumber: phone.trim(),
           phoneCodeHash,
-          phoneCode: otp,
+          phoneCode: otp.trim(),
         })
       );
       const sessionString = client.session.save() as unknown as string;
-      await db.credentials.put({ id: 1, apiId: Number(apiId), apiHash, sessionString, phone });
+      await db.credentials.put({ id: 1, apiId: Number(apiId), apiHash, sessionString, phone: phone.trim() });
       refresh();
       navigate("/drive");
     } catch (e: unknown) {
@@ -149,6 +96,9 @@ export default function LoginPage() {
 
   const handlePassword = async () => {
     setError("");
+    if (!password) {
+      return setError("Please enter your 2FA password.");
+    }
     setLoading(true);
     try {
       if (!client) throw new Error("Client not initialized");
@@ -159,7 +109,7 @@ export default function LoginPage() {
       await client.invoke(new Api.auth.CheckPassword({ password: passwordSrpCheck }));
 
       const sessionString = client.session.save() as unknown as string;
-      await db.credentials.put({ id: 1, apiId: Number(apiId), apiHash, sessionString, phone });
+      await db.credentials.put({ id: 1, apiId: Number(apiId), apiHash, sessionString, phone: phone.trim() });
       refresh();
       navigate("/drive");
     } catch (e: unknown) {
@@ -170,263 +120,286 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-base-100">
-
-      {/* ── Navbar ── */}
-      <div className="navbar bg-base-200 border-b border-base-300 px-6">
-        <div className="flex-1 flex items-center gap-2">
-          <HardDrive size={20} className="text-primary" />
-          <span className="font-bold text-base-content">TGDrive</span>
-          <span className="badge badge-primary badge-outline badge-xs ml-1">Beta</span>
+    <div className="min-h-screen bg-[#f0f4f9] dark:bg-[#131314] flex flex-col justify-between items-center p-4 sm:p-6 font-sans select-none">
+      {/* Top Bar with Theme Toggle */}
+      <div className="w-full max-w-4xl flex items-center justify-between py-2">
+        <div className="flex items-center gap-2">
+          <GoogleDriveLogo className="w-8 h-8" />
+          <span className="font-medium text-lg text-gray-700 dark:text-gray-200">
+            Drive <span className="text-xs bg-[#0088cc] text-white px-1.5 py-0.5 rounded font-bold uppercase">Telegram</span>
+          </span>
         </div>
-        <div className="flex-none flex items-center gap-3 text-xs text-base-content/40">
-          <a href="https://github.com/fbpatel003/tgdrive" target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-base-content/70 transition-colors">
-            <Code2 size={14} /> GitHub
-          </a>
-        </div>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="p-2 rounded-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-white/80 dark:hover:bg-gray-800 transition-colors"
+          title="Toggle theme"
+        >
+          {theme === "light" ? <Moon size={18} /> : <Sun size={18} className="text-amber-400" />}
+        </button>
       </div>
 
-      {/* ── Hero ── */}
-      <div className="max-w-6xl mx-auto px-6 pt-16 pb-12">
-        <div className="flex flex-col lg:flex-row gap-12 items-start">
-
-          {/* Left — info side */}
-          <div className="flex-1 min-w-0">
-            <div className="inline-flex items-center gap-2 bg-primary/10 text-primary text-xs font-medium px-3 py-1 rounded-full mb-5">
-              <Zap size={12} /> Free · Unlimited · No server
+      {/* ── Main Google Sign-In Card ── */}
+      <div className="w-full max-w-[440px] my-auto">
+        <div className="bg-white dark:bg-[#1e1f20] border border-gray-200 dark:border-gray-800 rounded-[28px] p-8 sm:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] transition-all">
+          {/* Logo & Header */}
+          <div className="flex flex-col items-center text-center mb-7">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50/70 dark:bg-blue-950/40 flex items-center justify-center mb-4">
+              <GoogleDriveLogo className="w-10 h-10" />
             </div>
-            <h1 className="text-4xl font-bold text-base-content leading-tight mb-4">
-              Your Telegram account<br />
-              <span className="text-primary">as unlimited cloud storage</span>
+
+            <h1 className="text-2xl font-normal text-gray-900 dark:text-gray-100 mb-1">
+              Sign in
             </h1>
-            <p className="text-base-content/60 text-base mb-8 max-w-lg">
-              TGDrive uses Telegram's MTProto API directly from your browser — no middleman server, no subscription, no storage limit. Your files live on Telegram's infrastructure forever.
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              to continue to Google Drive (Telegram MTProto)
             </p>
+          </div>
 
-            {/* Feature pills */}
-            <div className="flex flex-wrap gap-2 mb-10">
-              {[
-                { icon: <Shield size={13} />, label: "Zero-server privacy" },
-                { icon: <Upload size={13} />, label: "Up to 2 GB per file" },
-                { icon: <FolderOpen size={13} />, label: "Folder organisation" },
-                { icon: <Lock size={13} />, label: "Credentials stay in your browser" },
-              ].map((f) => (
-                <span key={f.label} className="flex items-center gap-1.5 text-xs bg-base-200 text-base-content/60 px-3 py-1.5 rounded-lg">
-                  {f.icon} {f.label}
-                </span>
-              ))}
+          {/* Form Error */}
+          {error && (
+            <div className="mb-5 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs">
+              {error}
             </div>
+          )}
 
-            {/* How to start */}
-            <h2 className="text-sm font-semibold text-base-content/50 uppercase tracking-widest mb-5">How to get started</h2>
+          {/* ── Step 1: Phone Number ── */}
+          {step === "phone" && (
             <div className="space-y-4">
-              {STEPS.map((s) => (
-                <div key={s.num} className="flex gap-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                    {s.icon}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-xs text-primary font-mono font-bold">{s.num}</span>
-                      <span className="text-sm font-semibold text-base-content">{s.title}</span>
-                    </div>
-                    <p className="text-xs text-base-content/50 leading-relaxed">{s.desc}</p>
-                  </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Telegram Phone Number
+                </label>
+                <div className="relative">
+                  <input
+                    type="tel"
+                    placeholder="+66 81 234 5678"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handlePhone()}
+                    autoFocus
+                    className="w-full px-3.5 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#282a2d] text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] transition-all text-sm font-mono"
+                  />
+                  <Phone size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 </div>
-              ))}
-            </div>
-
-            {/* Telegram API link callout */}
-            <a
-              href="https://my.telegram.org/apps"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-8 flex items-center gap-3 bg-base-200 hover:bg-base-300 transition-colors rounded-xl px-4 py-3 group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                <ExternalLink size={14} className="text-blue-400" />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Include country code (e.g. +66 for Thailand, +1 for US).
+                </p>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-base-content">Get your API credentials</p>
-                <p className="text-xs text-base-content/40 truncate">my.telegram.org → API Development Tools</p>
-              </div>
-              <ExternalLink size={13} className="text-base-content/20 group-hover:text-base-content/50 transition-colors" />
-            </a>
-          </div>
 
-          {/* Right — login card */}
-          <div className="w-full lg:w-[380px] flex-shrink-0">
-            <div className="card bg-base-200 shadow-xl">
-              <div className="card-body gap-5">
-                <div className="flex items-center gap-2">
-                  <HardDrive size={18} className="text-primary" />
-                  <span className="font-semibold text-base-content">Sign in to TGDrive</span>
-                </div>
-
-                {step === "credentials" && (
-                  <>
-                    <div className="flex items-center gap-2 text-base-content/60">
-                      <KeyRound size={14} />
-                      <span className="text-xs font-medium">Step 1 of 3 — API Credentials</span>
-                    </div>
-                    <label className="form-control">
-                      <div className="label"><span className="label-text">API ID</span></div>
-                      <input type="number" className="input input-bordered" placeholder="12345678"
-                        value={apiId} onChange={(e) => setApiId(e.target.value)} />
-                    </label>
-                    <label className="form-control">
-                      <div className="label"><span className="label-text">API Hash</span></div>
-                      <input type="text" className="input input-bordered font-mono text-sm" placeholder="a1b2c3d4e5f6..."
-                        value={apiHash} onChange={(e) => setApiHash(e.target.value)} />
-                    </label>
-                    {error && <div className="alert alert-error text-sm py-2">{error}</div>}
-                    <button className="btn btn-primary" onClick={handleCredentials}>Continue</button>
-                    <p className="text-xs text-base-content/30 text-center -mt-2">
-                      Stored only in your browser's IndexedDB
-                    </p>
-                  </>
-                )}
-
-                {step === "phone" && (
-                  <>
-                    <div className="flex items-center gap-2 text-base-content/60">
-                      <Phone size={14} />
-                      <span className="text-xs font-medium">Step 2 of 3 — Phone Number</span>
-                    </div>
-                    <label className="form-control">
-                      <div className="label"><span className="label-text">Phone with country code</span></div>
-                      <input type="tel" className="input input-bordered" placeholder="+91 98765 43210"
-                        value={phone} onChange={(e) => setPhone(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handlePhone()} />
-                    </label>
-                    {error && <div className="alert alert-error text-sm py-2">{error}</div>}
-                    <div className="flex gap-2">
-                      <button className="btn btn-ghost flex-1" onClick={() => setStep("credentials")}>Back</button>
-                      <button className="btn btn-primary flex-1" onClick={handlePhone} disabled={loading}>
-                        {loading ? <span className="loading loading-spinner loading-sm" /> : "Send Code"}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {step === "otp" && (
-                  <>
-                    <div className="flex items-center gap-2 text-base-content/60">
-                      <ShieldCheck size={14} />
-                      <span className="text-xs font-medium">Step 3 of 3 — Verification</span>
-                    </div>
-                    <p className="text-xs text-base-content/40 -mt-3">
-                      Check your Telegram app for the code sent to{" "}
-                      <span className="font-medium text-base-content/60">{phone}</span>
-                    </p>
-                    <label className="form-control">
-                      <div className="label"><span className="label-text">Code</span></div>
-                      <input type="text" className="input input-bordered tracking-widest text-center text-lg font-mono"
-                        placeholder="· · · · ·" maxLength={6} value={otp}
-                        onChange={(e) => setOtp(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleOtp()} autoFocus />
-                    </label>
-                    {error && <div className="alert alert-error text-sm py-2">{error}</div>}
-                    <div className="flex gap-2">
-                      <button className="btn btn-ghost flex-1" onClick={() => setStep("phone")}>Back</button>
-                      <button className="btn btn-primary flex-1" onClick={handleOtp} disabled={loading}>
-                        {loading ? <span className="loading loading-spinner loading-sm" /> : "Sign In"}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {step === "password" && (
-                  <>
-                    <div className="flex items-center gap-2 text-base-content/60">
-                      <Lock size={14} />
-                      <span className="text-xs font-medium">Two-Step Verification</span>
-                    </div>
-                    <p className="text-xs text-base-content/40 -mt-3">
-                      Enter your Telegram 2FA Cloud Password:
-                    </p>
-                    <label className="form-control">
-                      <div className="label"><span className="label-text">Password</span></div>
-                      <input type="password" className="input input-bordered text-center text-lg"
-                        placeholder="••••••••" value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handlePassword()} autoFocus />
-                    </label>
-                    {error && <div className="alert alert-error text-sm py-2">{error}</div>}
-                    <div className="flex gap-2">
-                      <button className="btn btn-ghost flex-1" onClick={() => setStep("otp")}>Back</button>
-                      <button className="btn btn-primary flex-1" onClick={handlePassword} disabled={loading}>
-                        {loading ? <span className="loading loading-spinner loading-sm" /> : "Verify Password"}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-              </div>
-            </div>
-
-            {/* Privacy note under card */}
-            <div className="mt-3 flex items-start gap-2 px-1">
-              <Lock size={12} className="text-base-content/25 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-base-content/30 leading-relaxed">
-                TGDrive has no backend. Your API credentials, session token, and file metadata are stored exclusively in your browser and never transmitted to any TGDrive server.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── FAQ ── */}
-      <div className="border-t border-base-300 bg-base-200/50">
-        <div className="max-w-3xl mx-auto px-6 py-14">
-          <h2 className="text-lg font-bold text-base-content mb-6 text-center">Frequently asked questions</h2>
-          <div className="space-y-2">
-            {FAQS.map((faq, i) => (
-              <div key={i} className="bg-base-200 rounded-xl overflow-hidden">
+              {/* Advanced API Config Accordion */}
+              <div className="pt-1">
                 <button
-                  className="w-full flex items-center justify-between px-5 py-4 text-left"
-                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  type="button"
+                  onClick={() => setShowAdvanced((prev) => !prev)}
+                  className="flex items-center gap-1.5 text-xs text-[#1a73e8] dark:text-[#8ab4f8] hover:underline"
                 >
-                  <span className="text-sm font-medium text-base-content">{faq.q}</span>
-                  {openFaq === i
-                    ? <ChevronUp size={15} className="text-base-content/40 flex-shrink-0" />
-                    : <ChevronDown size={15} className="text-base-content/40 flex-shrink-0" />}
+                  <KeyRound size={13} />
+                  <span>Custom Telegram API Credentials</span>
+                  {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                 </button>
-                {openFaq === i && (
-                  <div className="px-5 pb-4 text-sm text-base-content/50 leading-relaxed border-t border-base-300 pt-3">
-                    {faq.a}
+
+                {showAdvanced && (
+                  <div className="mt-3 p-3.5 bg-gray-50 dark:bg-[#282a2d] rounded-xl border border-gray-200 dark:border-gray-700 space-y-3 animate-in fade-in-50 duration-150">
+                    <div>
+                      <label className="block text-[11px] text-gray-600 dark:text-gray-400 mb-1">
+                        API ID
+                      </label>
+                      <input
+                        type="number"
+                        value={apiId}
+                        onChange={(e) => setApiId(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1e1f20] text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-600 dark:text-gray-400 mb-1">
+                        API Hash
+                      </label>
+                      <input
+                        type="text"
+                        value={apiHash}
+                        onChange={(e) => setApiHash(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#1e1f20] text-xs font-mono"
+                      />
+                    </div>
+                    <p className="text-[10px] text-gray-400">
+                      Default credentials prefilled. You can also generate your own at{" "}
+                      <a
+                        href="https://my.telegram.org"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-500 underline"
+                      >
+                        my.telegram.org
+                      </a>.
+                    </p>
                   </div>
                 )}
               </div>
-            ))}
+
+              {/* Action Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handlePhone}
+                  disabled={loading}
+                  className="w-full py-3 px-4 rounded-full bg-[#1a73e8] hover:bg-[#1557b0] text-white font-medium text-sm shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+                >
+                  {loading ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Continue</span>
+                      <ArrowRight size={15} />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 2: OTP Verification ── */}
+          {step === "otp" && (
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/60 flex items-center gap-2.5">
+                <ShieldCheck size={18} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <p className="text-xs text-blue-900 dark:text-blue-200">
+                  Verification code sent to your Telegram app for{" "}
+                  <span className="font-semibold">{phone}</span>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Enter Login Code
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="· · · · ·"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleOtp()}
+                  autoFocus
+                  className="w-full px-3.5 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#282a2d] text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] transition-all text-center text-xl tracking-widest font-mono"
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setStep("phone")}
+                  className="flex-1 py-2.5 px-4 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOtp}
+                  disabled={loading}
+                  className="flex-1 py-2.5 px-4 rounded-full bg-[#1a73e8] hover:bg-[#1557b0] text-white text-sm font-medium shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {loading ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    "Sign In"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 3: 2FA Password ── */}
+          {step === "password" && (
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-900/60 flex items-center gap-2.5">
+                <Lock size={18} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <p className="text-xs text-amber-900 dark:text-amber-200">
+                  Two-step verification active. Enter your Telegram cloud password:
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Telegram Cloud Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handlePassword()}
+                  autoFocus
+                  className="w-full px-3.5 py-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#282a2d] text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] transition-all text-sm"
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setStep("otp")}
+                  className="flex-1 py-2.5 px-4 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePassword}
+                  disabled={loading}
+                  className="flex-1 py-2.5 px-4 rounded-full bg-[#1a73e8] hover:bg-[#1557b0] text-white text-sm font-medium shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {loading ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    "Verify"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Privacy Guarantee Note */}
+          <div className="mt-8 pt-5 border-t border-gray-100 dark:border-gray-800 flex items-start gap-2.5 text-[11px] text-gray-500 dark:text-gray-400">
+            <Shield size={14} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+            <span>
+              100% Client-side. Session and encryption keys are stored securely inside your browser's IndexedDB.
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Adsterra Native Banner */}
-      <AdsterraBanner className="border-t border-base-300" />
-
-      {/* ── Footer ── */}
-      <div className="border-t border-base-300 bg-base-200">
-        <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-base-content/30">
-          <div className="flex items-center gap-2">
-            <HardDrive size={14} className="text-primary/50" />
-            <span>TGDrive — built by <span className="text-base-content/50 font-medium">Fenil</span> · {new Date().getFullYear()}</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <a onClick={()=>navigate("/about")} className="hover:text-base-content/60 transition-colors">About</a>
-            <span>·</span>
-            <a onClick={()=>navigate("/privacy")} className="hover:text-base-content/60 transition-colors">Privacy Policy</a>
-            <span>·</span>
-            <a onClick={()=>navigate("/terms")} className="hover:text-base-content/60 transition-colors">Terms of Service</a>
-            <span>·</span>
-            <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="hover:text-base-content/60 transition-colors flex items-center gap-1">
-              Telegram API <ExternalLink size={10} />
-            </a>
-          </div>
+      {/* ── Google Sign-In Footer ── */}
+      <footer className="w-full max-w-4xl flex flex-col sm:flex-row items-center justify-between text-xs text-gray-500 dark:text-gray-400 py-3 gap-2">
+        <div className="flex items-center gap-2">
+          <span>Google Drive · Telegram Cloud Storage</span>
         </div>
-      </div>
 
+        <div className="flex items-center gap-6">
+          <a
+            href="https://telegram.org"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+          >
+            Telegram MTProto
+          </a>
+          <button
+            type="button"
+            onClick={() => navigate("/privacy")}
+            className="hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+          >
+            Privacy
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/terms")}
+            className="hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+          >
+            Terms
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

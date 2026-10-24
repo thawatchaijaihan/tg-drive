@@ -232,6 +232,78 @@ async def prune_lru_cache():
         except Exception as e:
             logger.error(f"Error in prune_lru_cache: {e}")
 
+def purge_deleted_video_record(chat_id: int, msg_id: int) -> int:
+    """Deletes a video record from tg_stream.db and cleans up cache files."""
+    try:
+        candidates = [chat_id, -abs(chat_id), abs(chat_id)]
+        if not str(chat_id).startswith("-100"):
+            candidates.append(int(f"-100{abs(chat_id)}"))
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        placeholders = ",".join(["?"] * len(candidates))
+        cur.execute(f"DELETE FROM videos WHERE chat_id IN ({placeholders}) AND msg_id=?", (*candidates, msg_id))
+        count = cur.rowcount
+        conn.commit()
+        conn.close()
+
+        for f in list(FASTSTART_DIR.glob(f"*{msg_id}*")) + list(CACHE_DIR.glob(f"*{msg_id}*")):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        if count > 0:
+            logger.info(f"Purged deleted video record chat_id={chat_id}, msg_id={msg_id}")
+        return count
+    except Exception as e:
+        logger.error(f"Error purging video record {chat_id}/{msg_id}: {e}")
+        return 0
+
+async def handle_api_delete_movie(request: web.Request):
+    try:
+        raw_chat_id = request.match_info["chat_id"]
+        msg_id = int(request.match_info["msg_id"])
+        chat_id = int(raw_chat_id)
+        deleted_count = purge_deleted_video_record(chat_id, msg_id)
+        return web.json_response({
+            "ok": True,
+            "deleted": msg_id,
+            "rows": deleted_count
+        }, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        logger.error(f"Error in handle_api_delete_movie: {e}")
+        return web.json_response({"ok": False, "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_api_delete_folder(request: web.Request):
+    try:
+        raw_chat_id = request.match_info["folder_id"]
+        chat_id = int(raw_chat_id)
+        candidates = [chat_id, -abs(chat_id), abs(chat_id)]
+        if not str(chat_id).startswith("-100"):
+            candidates.append(int(f"-100{abs(chat_id)}"))
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        placeholders = ",".join(["?"] * len(candidates))
+        cur.execute(f"DELETE FROM videos WHERE chat_id IN ({placeholders})", candidates)
+        deleted_count = cur.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"Deleted all movies for folder {raw_chat_id} via API ({deleted_count} rows)")
+        return web.json_response({
+            "ok": True,
+            "folder_id": raw_chat_id,
+            "rows": deleted_count
+        }, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        logger.error(f"Error in handle_api_delete_folder: {e}")
+        return web.json_response({"ok": False, "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_api_delete_movie_options(request: web.Request):
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "DELETE, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    })
+
 def get_file_info(msg):
     if not msg or not msg.media:
         return None
@@ -398,6 +470,11 @@ async def resolve_media_target(chat_id: int, msg_id: int):
     }
 
 async def get_or_probe_file_info(chat_id: int, msg_id: int):
+    real_cid, target = await resolve_media_target(chat_id, msg_id)
+    if not target:
+        purge_deleted_video_record(chat_id, msg_id)
+        return None
+
     cached = get_db_video(chat_id, msg_id)
     if not cached and chat_id > 0:
         cached = get_db_video(-int(f"100{chat_id}"), msg_id)
@@ -405,10 +482,6 @@ async def get_or_probe_file_info(chat_id: int, msg_id: int):
     # Re-probe if cached is missing or marked with octet-stream or incomplete .part1
     if cached and cached.get("duration", 0) > 0 and cached.get("mime", "") != "application/octet-stream" and not cached.get("name", "").endswith(".part1"):
         return cached
-
-    real_cid, target = await resolve_media_target(chat_id, msg_id)
-    if not target:
-        return None
 
     info = target["info"]
 
@@ -577,11 +650,54 @@ def get_all_movies():
 
     return movies
 
+LAST_MOVIES_SYNC_TIME = 0
+MOVIES_SYNC_INTERVAL = 300  # 5 minutes lazy batch validation cache window
+
+async def get_validated_movies():
+    global LAST_MOVIES_SYNC_TIME
+    now = time.time()
+    if now - LAST_MOVIES_SYNC_TIME > MOVIES_SYNC_INTERVAL:
+        LAST_MOVIES_SYNC_TIME = now
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            cur.execute("SELECT chat_id, msg_id FROM videos")
+            rows = cur.fetchall()
+            conn.close()
+
+            if rows:
+                from collections import defaultdict
+                by_chat = defaultdict(list)
+                for cid, mid in rows:
+                    by_chat[cid].append(mid)
+
+                deleted = []
+                for cid, mids in by_chat.items():
+                    try:
+                        # Single batched RPC call per channel
+                        msgs = await client.get_messages(cid, ids=mids)
+                        if not isinstance(msgs, list):
+                            msgs = [msgs]
+                        for mid, m in zip(mids, msgs):
+                            if not m or not getattr(m, "media", None):
+                                deleted.append((cid, mid))
+                    except Exception as ex:
+                        logger.debug(f"Lazy validator skipped chat {cid}: {ex}")
+
+                if deleted:
+                    for cid, mid in deleted:
+                        purge_deleted_video_record(cid, mid)
+                    logger.info(f"Lazy validator auto-purged {len(deleted)} deleted movies: {deleted}")
+        except Exception as e:
+            logger.error(f"Error in lazy movie validator: {e}")
+
+    return get_all_movies()
+
 async def handle_api_movies(request: web.Request):
-    movies = get_all_movies()
+    movies = await get_validated_movies()
     return web.json_response(movies, headers={
         "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=60"
+        "Cache-Control": "no-cache, no-store, must-revalidate"
     })
 
 CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
@@ -1021,10 +1137,6 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       <div class="brand-name">GAPT-CINEMA</div>
     </a>
     <div class="header-right" style="display:flex;align-items:center;gap:12px;">
-      <a href="https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb" target="_blank" class="nav-btn-colab" title="แปลงเป็น H.264 + Faststart ด้วย Google Colab">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        <span>แปลงไฟล์ด้วย Colab</span>
-      </a>
       <div class="search-container">
         <span class="search-icon">🔍</span>
         <input type="text" id="searchInput" class="search-input" placeholder="ค้นหาภาพยนตร์..." autocomplete="off">
@@ -1171,6 +1283,9 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
       if (hBanner && (hero.backdrop_url || hero.poster_url)) {
         hBanner.style.backgroundImage = 'url(' + (hero.backdrop_url || hero.poster_url) + ')';
       }
+    } else {
+      var hBanner = document.getElementById('heroBanner');
+      if (hBanner) hBanner.style.display = 'none';
     }
     renderMovies(allMovies);
   </script>
@@ -1178,9 +1293,11 @@ CINEMA_PORTAL_HTML = '''<!DOCTYPE html>
 </html>'''
 
 async def handle_cinema_portal(request: web.Request):
-    movies = get_all_movies()
+    movies = await get_validated_movies()
     movies_json = json.dumps(movies, ensure_ascii=False)
     html_content = CINEMA_PORTAL_HTML.replace("__INITIAL_MOVIES_JSON__", movies_json)
+    if not movies:
+        html_content = html_content.replace('id="heroBanner"', 'id="heroBanner" style="display:none;"')
     return web.Response(
         text=html_content,
         content_type="text/html",
@@ -1245,7 +1362,8 @@ async def handle_stream(request: web.Request):
 
     real_cid, target = await resolve_media_target(chat_id, msg_id)
     if not target or not target["parts"]:
-        return web.Response(text="Message does not contain streamable media", status=404)
+        purge_deleted_video_record(chat_id, msg_id)
+        return web.Response(text="Message does not contain streamable media or was deleted", status=404)
 
     file_info = target["info"]
     file_size = file_info["size"]
@@ -1685,6 +1803,295 @@ async def handle_converted_options(request: web.Request):
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
     })
+
+# ─── YOUTUBE DOWNLOAD & CONVERT ENGINE ────────────────────────────────────────
+YOUTUBE_DL_DIR = BASE_DIR / "downloads" / "youtube"
+YOUTUBE_DL_DIR.mkdir(parents=True, exist_ok=True)
+COOKIES_FILE = BASE_DIR / "cookies.txt"
+
+youtube_tasks = {}
+
+def get_yt_cookies_arg():
+    if COOKIES_FILE.exists() and COOKIES_FILE.stat().st_size > 10:
+        return ["--cookies", str(COOKIES_FILE)]
+    return []
+
+async def process_youtube_job(
+    task_id: str,
+    url: str,
+    folder_id: int = -1003525937661,
+    quality: str = "1080p",
+    progress_callback=None
+) -> dict:
+    task_dir = YOUTUBE_DL_DIR / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    out_tmpl = str(task_dir / "%(title).120s [%(id)s].%(ext)s")
+
+    youtube_tasks[task_id] = {
+        "task_id": task_id,
+        "url": url,
+        "folder_id": folder_id,
+        "quality": quality,
+        "status": "fetching_info",
+        "progress": 0,
+        "speed": "",
+        "eta": "",
+        "title": "",
+        "msg_id": None,
+        "error": None,
+        "created_at": time.time()
+    }
+
+    try:
+        cmd = [
+            "yt-dlp",
+            "--remote-components", "ejs:github",
+            "--js-runtimes", "node:/usr/bin/node",
+            "--newline",
+            "--no-colors",
+            "--no-playlist",
+            "--no-mtime",
+            "--socket-timeout", "30",
+            *get_yt_cookies_arg()
+        ]
+
+        if quality == "mp3":
+            cmd.extend([
+                "-x",
+                "--audio-format", "mp3",
+                "-o", out_tmpl,
+                url
+            ])
+        else:
+            max_h = 1080 if quality == "1080p" else (720 if quality == "720p" else 480)
+            fmt = f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={max_h}]+bestaudio/best[height<={max_h}]/best"
+            cmd.extend([
+                "-f", fmt,
+                "--merge-output-format", "mp4",
+                "--ppa", "Merger+ffmpeg:-movflags +faststart",
+                "--write-thumbnail",
+                "--convert-thumbnails", "jpg",
+                "-o", out_tmpl,
+                url
+            ])
+
+        logger.info(f"Starting yt-dlp job {task_id}: {' '.join(cmd[:10])}...")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        last_cb_time = 0
+        stderr_output = []
+
+        async def read_stderr():
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                decoded = line.decode('utf-8', errors='ignore').strip()
+                if decoded:
+                    stderr_output.append(decoded)
+                    if len(stderr_output) > 50:
+                        stderr_output.pop(0)
+
+        stderr_task = asyncio.create_task(read_stderr())
+
+        while True:
+            line_b = await proc.stdout.readline()
+            if not line_b:
+                break
+            line = line_b.decode('utf-8', errors='ignore').strip()
+            if not line:
+                continue
+
+            m = re.search(r'\[download\]\s+([\d\.]+)%\s+of\s+~?\s*([\d\.]+[KMG]iB)\s+at\s+([\d\.]+[KMG]iB/s)\s+ETA\s+([\d:]+)', line)
+            if m:
+                pct = int(float(m.group(1)))
+                size_str = m.group(2)
+                spd = m.group(3)
+                eta = m.group(4)
+                youtube_tasks[task_id]["status"] = "downloading"
+                youtube_tasks[task_id]["progress"] = pct
+                youtube_tasks[task_id]["speed"] = spd
+                youtube_tasks[task_id]["eta"] = eta
+
+                now = time.time()
+                if now - last_cb_time >= 3.0:
+                    last_cb_time = now
+                    if progress_callback:
+                        try:
+                            await progress_callback("downloading", pct, f"{spd} | เหลือ {eta}")
+                        except Exception:
+                            pass
+            elif "[Merger]" in line or "Merging formats" in line:
+                youtube_tasks[task_id]["status"] = "merging"
+                youtube_tasks[task_id]["progress"] = 99
+                if progress_callback:
+                    try:
+                        await progress_callback("merging", 99, "กำลังรวมภาพและเสียง...")
+                    except Exception:
+                        pass
+
+        await proc.wait()
+        await stderr_task
+
+        if proc.returncode != 0:
+            err_text = "\n".join(stderr_output) or "yt-dlp exited with error"
+            logger.error(f"yt-dlp failed for {task_id}: {err_text}")
+            youtube_tasks[task_id]["status"] = "failed"
+            youtube_tasks[task_id]["error"] = err_text
+            return youtube_tasks[task_id]
+
+        media_files = list(task_dir.glob("*.mp4")) or list(task_dir.glob("*.mp3")) or list(task_dir.glob("*.mkv")) or list(task_dir.glob("*.webm"))
+        if not media_files:
+            youtube_tasks[task_id]["status"] = "failed"
+            youtube_tasks[task_id]["error"] = "No media output file found"
+            return youtube_tasks[task_id]
+
+        media_file = media_files[0]
+        title = media_file.stem
+        clean_title = re.sub(r'\s*\[[\w\-]+\]$', '', title).strip() or title
+        youtube_tasks[task_id]["title"] = clean_title
+
+        thumb_file = None
+        thumbs = list(task_dir.glob("*.jpg")) or list(task_dir.glob("*.webp")) or list(task_dir.glob("*.png"))
+        if thumbs:
+            thumb_file = thumbs[0]
+        elif media_file.suffix.lower() == ".mp4":
+            gen_thumb = task_dir / "thumb.jpg"
+            try:
+                p_thumb = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-i", str(media_file), "-ss", "00:00:02", "-vframes", "1", "-q:v", "2", str(gen_thumb),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await p_thumb.wait()
+                if gen_thumb.exists():
+                    thumb_file = gen_thumb
+            except Exception as e:
+                logger.warning(f"Failed to generate thumbnail: {e}")
+
+        youtube_tasks[task_id]["status"] = "uploading"
+        youtube_tasks[task_id]["progress"] = 0
+        if progress_callback:
+            try:
+                await progress_callback("uploading", 0, "กำลังเตรียมอัปโหลด...")
+            except Exception:
+                pass
+
+        entity = await client.get_entity(folder_id)
+        last_up_time = 0
+
+        def tg_progress(current, total):
+            nonlocal last_up_time
+            now = time.time()
+            pct = int((current / total) * 100) if total > 0 else 0
+            youtube_tasks[task_id]["progress"] = pct
+            if now - last_up_time >= 3.5:
+                last_up_time = now
+                if progress_callback:
+                    cur_str = f"{current / (1024*1024):.1f} MB"
+                    tot_str = f"{total / (1024*1024):.1f} MB"
+                    asyncio.create_task(progress_callback("uploading", pct, f"{cur_str} / {tot_str}"))
+
+        logger.info(f"Uploading converted YouTube video '{clean_title}' ({media_file.stat().st_size} bytes) to {folder_id}...")
+        uploaded_msg = await client.send_file(
+            entity,
+            file=str(media_file),
+            caption=clean_title,
+            thumb=str(thumb_file) if thumb_file and thumb_file.exists() else None,
+            supports_streaming=True,
+            progress_callback=tg_progress
+        )
+
+        fsize = media_file.stat().st_size
+        mime = "audio/mpeg" if quality == "mp3" else "video/mp4"
+        save_db_video(folder_id, uploaded_msg.id, {
+            "name": clean_title,
+            "size": fsize,
+            "mime": mime,
+            "duration": 0,
+            "width": 1920 if quality == "1080p" else 1280,
+            "height": 1080 if quality == "1080p" else 720,
+            "status": "ready",
+            "progress": 100,
+            "qualities": ["source"]
+        })
+
+        youtube_tasks[task_id]["status"] = "completed"
+        youtube_tasks[task_id]["progress"] = 100
+        youtube_tasks[task_id]["msg_id"] = uploaded_msg.id
+        youtube_tasks[task_id]["folder_id"] = folder_id
+
+        logger.info(f"Successfully processed YouTube video {clean_title} -> msg_id {uploaded_msg.id}")
+        return youtube_tasks[task_id]
+
+    except Exception as e:
+        logger.error(f"Error in process_youtube_job: {e}", exc_info=True)
+        youtube_tasks[task_id]["status"] = "failed"
+        youtube_tasks[task_id]["error"] = str(e)
+        return youtube_tasks[task_id]
+    finally:
+        shutil.rmtree(task_dir, ignore_errors=True)
+
+async def handle_youtube_options(request: web.Request):
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    })
+
+async def handle_youtube_import(request: web.Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+
+    url = (data.get("url") or "").strip()
+    if not url:
+        return web.json_response({"error": "URL is required"}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+
+    folder_id_val = str(data.get("folder_id") or "3525937661").strip()
+    quality = (data.get("quality") or "1080p").strip()
+
+    clean_fid = folder_id_val
+    if not clean_fid.startswith("-100"):
+        clean_fid = f"-100{clean_fid}"
+    try:
+        target_cid = int(clean_fid)
+    except ValueError:
+        target_cid = -1003525937661
+
+    task_id = f"yt_{int(time.time())}_{os.urandom(3).hex()}"
+    asyncio.create_task(process_youtube_job(task_id, url, target_cid, quality))
+
+    return web.json_response({
+        "task_id": task_id,
+        "status": "queued",
+        "folder_id": target_cid,
+        "message": "YouTube download queued successfully"
+    }, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_youtube_status(request: web.Request):
+    task_id = request.match_info.get("task_id")
+    task = youtube_tasks.get(task_id)
+    if not task:
+        return web.json_response({"error": "Task not found"}, status=404, headers={"Access-Control-Allow-Origin": "*"})
+    return web.json_response(task, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_youtube_cookies_post(request: web.Request):
+    try:
+        content = await request.text()
+        if not content or len(content.strip()) < 10:
+            return web.json_response({"error": "Empty cookies content"}, status=400, headers={"Access-Control-Allow-Origin": "*"})
+        with open(COOKIES_FILE, "w", encoding="utf-8") as f:
+            f.write(content.strip())
+        logger.info(f"Updated cookies.txt from Web API ({len(content)} bytes)")
+        return web.json_response({"status": "ok", "message": "Cookies saved successfully"}, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+
 
 async def handle_colab_target_get(request: web.Request):
     return web.json_response(CURRENT_COLAB_TARGET, headers={"Access-Control-Allow-Origin": "*"})
@@ -3471,6 +3878,97 @@ async def handle_watch(request: web.Request):
 
 @client.on(events.NewMessage)
 async def on_media_message(event):
+    # 1. Check for cookie file uploaded by user in private DM
+    if event.is_private and event.message and event.message.media:
+        doc_name = ""
+        if hasattr(event.message, 'document') and event.message.document:
+            for attr in getattr(event.message.document, 'attributes', []):
+                if isinstance(attr, DocumentAttributeFilename):
+                    doc_name = (attr.file_name or "").lower()
+        if "cookie" in doc_name and doc_name.endswith(".txt"):
+            try:
+                status_msg = await event.reply("⏳ กำลังบันทึกไฟล์ cookies.txt ลงในเซิร์ฟเวอร์...")
+                await client.download_media(event.message, file=str(COOKIES_FILE))
+                await status_msg.edit("🍪 บันทึก `cookies.txt` เรียบร้อยแล้ว! ตอนนี้คุณสามารถส่งลิงก์ YouTube เพื่อดาวน์โหลดได้ทันทีครับ 🎉")
+            except Exception as e:
+                await event.reply(f"❌ บันทึก cookies ไม่สำเร็จ: {e}")
+            return
+
+    # 2. Check for text message (commands & YouTube links)
+    if event.is_private and (not event.message or not event.message.media):
+        text = (event.raw_text or "").strip()
+        if not text:
+            return
+
+        if text in ("/start", "/help") or text.startswith(("/start ", "/help ")):
+            help_msg = (
+                "👋 **ยินดีต้อนรับสู่ระบบแปลง YouTube เป็น MP4!**\n\n"
+                "📌 **วิธีใช้งานง่ายๆ:**\n"
+                "1. ส่งลิงก์ YouTube ที่ต้องการเข้ามาในแชทนี้ได้ทันที เช่น:\n"
+                "   `https://www.youtube.com/watch?v=...`\n"
+                "   หรือพิมพ์ `/yt <ลิงก์>`\n\n"
+                "2. บอทจะดาวน์โหลด แปลงไฟล์เป็น FastStart MP4 คุณภาพสูง และอัปโหลดเข้าสู่:\n"
+                "   📁 **TG-Drive โฟลเดอร์ YouTube**\n"
+                "   👉 https://drive.capt-th.work/drive/3525937661\n\n"
+                "3. พร้อมดูสตรีมมิ่งสดออนไลน์ได้ทันทีผ่าน GAPT-CINEMA!\n\n"
+                "🍪 **สถานะ Cookies:** มีการติดตั้ง cookies.txt แล้ว พร้อมดาวน์โหลด YouTube ได้ทันที"
+            )
+            await event.reply(help_msg, link_preview=False)
+            return
+
+        yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)[\w\-]+(?:[^\s]*))', text)
+        if yt_match:
+            yt_url = yt_match.group(1)
+            status_msg = await event.reply("⏳ ได้รับลิงก์ YouTube แล้ว! กำลังเริ่มประมวลผล...")
+            task_id = f"yt_{int(time.time())}_{event.sender_id}"
+            target_cid = -1003525937661
+
+            async def tg_progress(stage: str, pct: int, info: str):
+                try:
+                    if stage == "downloading":
+                        await status_msg.edit(f"📥 **กำลังดาวน์โหลดวิดีโอ:** {pct}%\n⚡ {info}")
+                    elif stage == "merging":
+                        await status_msg.edit(f"⚙️ **กำลังประมวลผล FastStart MP4...**")
+                    elif stage == "uploading":
+                        await status_msg.edit(f"📤 **กำลังอัปโหลดขึ้น TG-Drive:** {pct}%\n📦 {info}")
+                except Exception:
+                    pass
+
+            async def run_tg_yt():
+                res = await process_youtube_job(
+                    task_id=task_id,
+                    url=yt_url,
+                    folder_id=target_cid,
+                    quality="1080p",
+                    progress_callback=tg_progress
+                )
+                if res.get("status") == "completed":
+                    m_id = res.get("msg_id")
+                    v_title = res.get("title", "YouTube Video")
+                    watch_link = f"https://stream.capt-th.work/watch/{target_cid}/{m_id}"
+                    drive_link = "https://drive.capt-th.work/drive/3525937661"
+                    done_text = (
+                        f"✅ **แปลงและอัปโหลดเข้าสู่ TG-Drive สำเร็จ!**\n\n"
+                        f"🎬 **ชื่อวิดีโอ:** {v_title}\n"
+                        f"📁 **เปิดใน TG-Drive:** {drive_link}\n"
+                        f"▶️ **ดูสตรีมมิ่งออนไลน์:** {watch_link}"
+                    )
+                    await status_msg.edit(done_text, link_preview=False)
+                else:
+                    err = res.get("error", "Unknown error")
+                    if "Sign in to confirm" in err or "bot" in err.lower():
+                        await status_msg.edit(
+                            "⚠️ **YouTube แจ้งเตือนความปลอดภัย (Bot Guard):**\n\n"
+                            "กรุณาใช้ส่วนขยาย 'Get cookies.txt LOCALLY' บนเบราว์เซอร์ เพื่อส่งออกไฟล์ `cookies.txt` จากเว็บ YouTube\n"
+                            "แล้วส่งไฟล์ `cookies.txt` เข้ามาในแชทนี้ บอทจะบันทึกและทำงานต่อทันทีครับ!"
+                        )
+                    else:
+                        await status_msg.edit(f"❌ **เกิดข้อผิดพลาดในการดาวน์โหลด:**\n`{err[:250]}`")
+
+            asyncio.create_task(run_tg_yt())
+            return
+
+    # 3. Media indexer logic
     if not event.message or not event.message.media:
         return
 
@@ -3486,14 +3984,11 @@ async def on_media_message(event):
 
     save_db_video(chat_id, msg_id, file_info)
 
-    # In channels/groups or when media already has a caption, do not send a duplicate reply message.
-    # All details, player, and downloads are managed via TG-Drive (https://drive.capt-th.work/) & GAPT-CINEMA.
     has_caption = bool(getattr(event.message, "message", None) and event.message.message.strip())
     if event.is_channel or has_caption:
         logger.info(f"Indexed media {msg_id} in chat {chat_id} cleanly (no clutter reply).")
         return
 
-    # In private DM without caption, reply with only the clean file name
     icon = "🎬" if is_video else "📁"
     text = f"{icon} <b>{html.escape(name)}</b>"
     try:
@@ -3555,6 +4050,10 @@ def create_app():
     app.router.add_post("/api/colab/target", handle_colab_target_post)
     app.router.add_options("/api/colab/target", handle_colab_target_options)
     app.router.add_get("/api/movies", handle_api_movies)
+    app.router.add_delete("/api/movies/{chat_id}/{msg_id}", handle_api_delete_movie)
+    app.router.add_options("/api/movies/{chat_id}/{msg_id}", handle_api_delete_movie_options)
+    app.router.add_delete("/api/movies/folder/{folder_id}", handle_api_delete_folder)
+    app.router.add_options("/api/movies/folder/{folder_id}", handle_api_delete_movie_options)
     app.router.add_get("/health", handle_index)
     app.router.add_get("/sw.js", handle_service_worker)
     app.router.add_get("/watch/{chat_id}/{msg_id}", handle_watch)
@@ -3566,6 +4065,18 @@ def create_app():
     app.router.add_get("/hls/{chat_id}/{msg_id}/{quality}/{seg_num}", handle_hls_segment)
     app.router.add_get("/api/status/{chat_id}/{msg_id}", handle_api_status)
     app.router.add_post("/api/transcode/{chat_id}/{msg_id}", handle_api_transcode)
+    app.router.add_post("/api/youtube/import", handle_youtube_import)
+    app.router.add_get("/api/youtube/status/{task_id}", handle_youtube_status)
+    app.router.add_post("/api/youtube/cookies", handle_youtube_cookies_post)
+    app.router.add_options("/api/youtube/import", handle_youtube_options)
+    app.router.add_options("/api/youtube/status/{task_id}", handle_youtube_options)
+    app.router.add_options("/api/youtube/cookies", handle_youtube_options)
+    try:
+        from drugtest_routes import register_drugtest_routes
+        register_drugtest_routes(app)
+        logger.info("Successfully registered drugtest routes on /drugtest/*")
+    except Exception as e:
+        logger.debug(f"Optional drugtest routes not registered: {e}")
     return app
 
 if __name__ == "__main__":

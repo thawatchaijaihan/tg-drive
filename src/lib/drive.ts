@@ -197,6 +197,17 @@ export async function deleteFolder(folderId: string): Promise<void> {
   await db.files.where("folderId").equals(folderId).delete();
   const fileIds = (await db.files.where("folderId").equals(folderId).primaryKeys()) as string[];
   await db.thumbs.bulkDelete(fileIds);
+
+  // Sync deletion with GAPT-CINEMA streaming server
+  try {
+    const rawChatId = folderId.startsWith("-100") ? folderId : `-100${folderId}`;
+    fetch(`https://stream.capt-th.work/api/movies/folder/${rawChatId}`, {
+      method: "DELETE",
+      mode: "cors"
+    }).catch(() => {});
+  } catch (e) {
+    console.warn("Could not notify stream server of folder deletion:", e);
+  }
 }
 
 // ─── Files ────────────────────────────────────────────────────────────────────
@@ -626,6 +637,19 @@ export async function deleteFile(file: CachedFile): Promise<void> {
   await client.deleteMessages(peer, idsToDelete, { revoke: true });
   await db.files.delete(file.id);
   await db.thumbs.delete(file.id);
+
+  // Sync deletion with GAPT-CINEMA streaming server
+  try {
+    const rawChatId = file.folderId.startsWith("-100") ? file.folderId : `-100${file.folderId}`;
+    for (const mid of idsToDelete) {
+      fetch(`https://stream.capt-th.work/api/movies/${rawChatId}/${mid}`, {
+        method: "DELETE",
+        mode: "cors"
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn("Could not notify stream server of deletion:", e);
+  }
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
+import { ThemeProvider } from "./context/ThemeContext";
 import LoginPage from "./pages/LoginPage";
 import DrivePage from "./pages/DrivePage";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -44,12 +45,14 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <BrowserRouter basename={basename}>
-        <AuthProvider>
-          <AppRoutes />
-          <CookieBanner />
-        </AuthProvider>
-      </BrowserRouter>
+      <ThemeProvider>
+        <BrowserRouter basename={basename}>
+          <AuthProvider>
+            <AppRoutes />
+            <CookieBanner />
+          </AuthProvider>
+        </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

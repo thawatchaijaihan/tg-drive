@@ -1,3 +1,59 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root,
+  :root[data-theme="light"] {
+    --g-bg: #f8fafd;
+    --g-surface: #ffffff;
+    --g-surface-variant: #f0f4f9;
+    --g-border: #e0e3e7;
+    --g-hover: #edf2fc;
+    --g-pill: #c2e7ff;
+    --g-pill-text: #001d35;
+    --g-text-primary: #1f1f1f;
+    --g-text-secondary: #444746;
+    --g-text-muted: #72777a;
+    --g-search-bg: #edf2fc;
+    --g-search-hover: #e1e9f8;
+  }
+
+  :root[data-theme="dark"],
+  .dark {
+    --g-bg: #131314;
+    --g-surface: #1e1f20;
+    --g-surface-variant: #28292a;
+    --g-border: #37393b;
+    --g-hover: #2d2f31;
+    --g-pill: #004a77;
+    --g-pill-text: #c2e7ff;
+    --g-text-primary: #e3e3e3;
+    --g-text-secondary: #c4c7c5;
+    --g-text-muted: #8e918f;
+    --g-search-bg: #282a2d;
+    --g-search-hover: #333538;
+  }
+}
+
+body {
+  background-color: var(--g-bg);
+  color: var(--g-text-primary);
+  font-family: "Google Sans", Roboto, Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Custom Google Drive subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 120, 0.45);
+}
