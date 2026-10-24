@@ -2439,6 +2439,34 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       width: 18px;
       height: 18px;
     }
+    .btn-top-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      color: #cbd5e1;
+      text-decoration: none;
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(10px);
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .btn-top-close:hover {
+      background: rgba(239, 68, 68, 0.35);
+      border-color: #ef4444;
+      color: #ffffff;
+      transform: scale(1.08);
+    }
+    .btn-top-close svg {
+      width: 20px;
+      height: 20px;
+    }
+    .top-left-placeholder {
+      width: 38px;
+    }
     .player-title {
       font-size: 1.05rem;
       font-weight: 600;
@@ -2919,14 +2947,16 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
 
     <!-- Video Controls Layer (Custom HTML5 Player) -->
     <div class="player-ui" id="player-ui">
-      <!-- Top Bar: Back & Title -->
+      <!-- Top Bar: Title & Close Button -->
       <div class="player-top-bar">
-        <a href="/" class="btn-top-back" title="กลับหน้าภาพยนตร์ทั้งหมด">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-          <span>พอร์ทัลหนัง</span>
-        </a>
+        <div class="top-left-placeholder"></div>
         <div class="player-title">__FILE_NAME__</div>
-        <div class="top-right-placeholder"></div>
+        <a href="https://stream.capt-th.work/" class="btn-top-close" title="ปิด (กลับหน้า https://stream.capt-th.work/)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </a>
       </div>
 
       <!-- Bottom Bar: Timeline & Control Buttons -->
