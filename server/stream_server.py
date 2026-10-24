@@ -2449,31 +2449,12 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
       overflow: hidden;
       text-overflow: ellipsis;
       text-align: center;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
     }
     .top-right-placeholder {
-      width: auto;
-    }
-
-    .btn-top-colab {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(245, 158, 11, 0.15);
-      color: #fbbf24;
-      border: 1px solid rgba(245, 158, 11, 0.4);
-      padding: 6px 14px;
-      border-radius: 9999px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      text-decoration: none;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-    }
-    .btn-top-colab:hover {
-      background: rgba(245, 158, 11, 0.3);
-      border-color: #f59e0b;
-      transform: translateY(-1px);
-      box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
+      width: 120px;
     }
 
 
@@ -2945,10 +2926,7 @@ PURE_PLAYER_HTML = '''<!DOCTYPE html>
           <span>พอร์ทัลหนัง</span>
         </a>
         <div class="player-title">__FILE_NAME__</div>
-        <a href="https://colab.research.google.com/github/thawatchaijaihan/tg-drive/blob/main/tg_video_faststart_optimizer.ipynb" target="_blank" class="btn-top-colab" title="แปลงเป็น Faststart H.264 ด้วย Google Colab เพื่อเล่นบนทีวี">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2.2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          <span>แปลงด้วย Colab</span>
-        </a>
+        <div class="top-right-placeholder"></div>
       </div>
 
       <!-- Bottom Bar: Timeline & Control Buttons -->
