@@ -33,9 +33,7 @@ jobs:
         run: npm run build
 
       - name: 🌐 Deploy to Cloudflare Pages
-        if: env.HAS_CF_TOKEN != ''
-        env:
-          HAS_CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
         uses: cloudflare/pages-action@v1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -43,6 +41,10 @@ jobs:
           projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME || 'tgdrive-d7y' }}
           directory: dist
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: ℹ️ Cloudflare Notice
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "ℹ️ CLOUDFLARE_API_TOKEN not configured in GitHub Secrets. Skipping Cloudflare Pages deploy."
 
   # ─────────────────────────────────────────────────────────────
   # JOB 2: Deploy FileStream Server & Player to Oracle Cloud (OCI)
