@@ -3876,10 +3876,19 @@ async def handle_watch(request: web.Request):
 
 # ─── TELEGRAM BOT LISTENER ────────────────────────────────────────────────────
 
+BOT_ID = 8627312320
+
 @client.on(events.NewMessage)
 async def on_media_message(event):
+    if not event.message:
+        return
+
+    # Never process messages sent by this bot itself to avoid loops
+    if getattr(event.message, 'out', False) or event.sender_id == BOT_ID:
+        return
+
     # 1. Check for cookie file uploaded by user in private DM
-    if event.is_private and event.message and event.message.media:
+    if event.is_private and event.message.media:
         doc_name = ""
         if hasattr(event.message, 'document') and event.message.document:
             for attr in getattr(event.message.document, 'attributes', []):
@@ -3894,24 +3903,20 @@ async def on_media_message(event):
                 await event.reply(f"❌ บันทึก cookies ไม่สำเร็จ: {e}")
             return
 
-    # 2. Check for text message (commands & YouTube links)
-    if event.is_private and (not event.message or not event.message.media):
+    # 2. Check for YouTube links (Both in [TGDrive] Channels AND in private DM!)
+    if not event.message.media:
         text = (event.raw_text or "").strip()
         if not text:
             return
 
-        if text in ("/start", "/help") or text.startswith(("/start ", "/help ")):
+        # Private DM commands
+        if event.is_private and (text in ("/start", "/help") or text.startswith(("/start ", "/help "))):
             help_msg = (
                 "👋 **ยินดีต้อนรับสู่ระบบแปลง YouTube เป็น MP4!**\n\n"
-                "📌 **วิธีใช้งานง่ายๆ:**\n"
-                "1. ส่งลิงก์ YouTube ที่ต้องการเข้ามาในแชทนี้ได้ทันที เช่น:\n"
-                "   `https://www.youtube.com/watch?v=...`\n"
-                "   หรือพิมพ์ `/yt <ลิงก์>`\n\n"
-                "2. บอทจะดาวน์โหลด แปลงไฟล์เป็น FastStart MP4 คุณภาพสูง และอัปโหลดเข้าสู่:\n"
-                "   📁 **TG-Drive โฟลเดอร์ YouTube**\n"
-                "   👉 https://drive.capt-th.work/drive/3525937661\n\n"
-                "3. พร้อมดูสตรีมมิ่งสดออนไลน์ได้ทันทีผ่าน GAPT-CINEMA!\n\n"
-                "🍪 **สถานะ Cookies:** มีการติดตั้ง cookies.txt แล้ว พร้อมดาวน์โหลด YouTube ได้ทันที"
+                "📌 **วิธีใช้งานง่ายๆ 2 ช่องทาง:**\n"
+                "1. **ส่งในห้อง [TGDrive] YouTube:** เพียงวางลิงก์ YouTube ลงในห้อง บอทจะดาวน์โหลด แปลงเป็น MP4 และอัปโหลดเป็นวิดีโอลงห้องนั้นให้อัตโนมัติทันที!\n"
+                "2. **ส่งในแชทนี้:** ส่งลิงก์ YouTube เช่น `https://youtu.be/...` หรือพิมพ์ `/yt <ลิงก์>`\n\n"
+                "📁 ไฟล์ทั้งหมดจะถูกจัดเก็บเข้าสู่ TG-Drive และพร้อมสตรีมผ่าน GAPT-CINEMA ทันทีครับ!"
             )
             await event.reply(help_msg, link_preview=False)
             return
@@ -3919,9 +3924,14 @@ async def on_media_message(event):
         yt_match = re.search(r'(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)[\w\-]+(?:[^\s]*))', text)
         if yt_match:
             yt_url = yt_match.group(1)
-            status_msg = await event.reply("⏳ ได้รับลิงก์ YouTube แล้ว! กำลังเริ่มประมวลผล...")
-            task_id = f"yt_{int(time.time())}_{event.sender_id}"
-            target_cid = -1003525937661
+            target_cid = event.chat_id if event.is_channel else -1003525937661
+            in_channel = bool(event.is_channel)
+
+            status_msg = await event.reply(
+                "⏳ ตรวจพบลิงก์ YouTube! กำลังเริ่มดาวน์โหลดและแปลงเป็น FastStart MP4...",
+                link_preview=False
+            )
+            task_id = f"yt_{int(time.time())}_{abs(target_cid)}"
 
             async def tg_progress(stage: str, pct: int, info: str):
                 try:
@@ -3945,15 +3955,30 @@ async def on_media_message(event):
                 if res.get("status") == "completed":
                     m_id = res.get("msg_id")
                     v_title = res.get("title", "YouTube Video")
+                    clean_id_str = str(abs(target_cid))
+                    if clean_id_str.startswith("100") and len(clean_id_str) > 10:
+                        clean_id_str = clean_id_str[3:]
                     watch_link = f"https://stream.capt-th.work/watch/{target_cid}/{m_id}"
-                    drive_link = "https://drive.capt-th.work/drive/3525937661"
-                    done_text = (
-                        f"✅ **แปลงและอัปโหลดเข้าสู่ TG-Drive สำเร็จ!**\n\n"
-                        f"🎬 **ชื่อวิดีโอ:** {v_title}\n"
-                        f"📁 **เปิดใน TG-Drive:** {drive_link}\n"
-                        f"▶️ **ดูสตรีมมิ่งออนไลน์:** {watch_link}"
-                    )
-                    await status_msg.edit(done_text, link_preview=False)
+                    drive_link = f"https://drive.capt-th.work/drive/{clean_id_str}"
+
+                    if in_channel:
+                        # In channel, clean up status message and original link so only video remains
+                        try:
+                            await status_msg.delete()
+                        except Exception:
+                            await status_msg.edit(f"✅ **แปลงเสร็จสมบูรณ์:** {v_title}")
+                        try:
+                            await event.delete()
+                        except Exception:
+                            pass
+                    else:
+                        done_text = (
+                            f"✅ **แปลงและอัปโหลดเข้าสู่ TG-Drive สำเร็จ!**\n\n"
+                            f"🎬 **ชื่อวิดีโอ:** {v_title}\n"
+                            f"📁 **เปิดใน TG-Drive:** {drive_link}\n"
+                            f"▶️ **ดูสตรีมมิ่งออนไลน์:** {watch_link}"
+                        )
+                        await status_msg.edit(done_text, link_preview=False)
                 else:
                     err = res.get("error", "Unknown error")
                     if "Sign in to confirm" in err or "bot" in err.lower():
